@@ -16,22 +16,17 @@ before_script:
 build:
   stage: build
   script:
-    # Checkout code
     - git config --global http.version HTTP/1.1
     - git fetch --unshallow || true
     - git checkout $CI_COMMIT_REF_NAME
 
-    # Git Semantic Version (puedes usar un script local o una imagen personalizada con semantic version)
     - export NEW_VERSION=$(git describe --tags --match "v*" --always --dirty)
 
-    # Login to Docker
     - docker login -u "$DOCKER_USER" -p "$DOCKER_PASSWORD"
 
-    # Build Docker images
     - docker build -t elviomixto/docker-graphql:$NEW_VERSION .
     - docker build -t elviomixto/docker-graphql:latest .
 
-    # Push Docker images
     - docker push elviomixto/docker-graphql:$NEW_VERSION
     - docker push elviomixto/docker-graphql:latest
 

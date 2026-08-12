@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-
+import PB from './img/PB.jpeg';
 const MAX_FILE_SIZE = 50 * 1024 * 1024;
 const MAX_FILES = 10;
 
@@ -105,19 +105,21 @@ export default function App() {
   return (
     <main className="shell">
       <header className="topbar">
-        <div className="brand-mark" aria-hidden="true">PB</div>
+        <div className="brand-mark" aria-label="Logo Policía Boliviana">
+          <img src={PB} alt="Escudo Policía Boliviana" />
+        </div>
         <div>
           <p className="eyebrow">Policía Boliviana</p>
           <h1>Archivo digital seguro</h1>
         </div>
-        <div className="system-status"><span /> Sistemas protegidos</div>
+        {/*<div className="system-status"><span /> --- </div> */}
       </header>
 
       <section className="hero">
         <div>
           <p className="eyebrow">Gestión documental</p>
-          <h2>Resguarde archivos.</h2>
-          <p className="lead">Los PDF reciben automáticamente la marca de agua <strong>POLICIA BOLIVIANA</strong> antes de guardarse en el repositorio S3 privado.</p>
+          <h2>Resguardo de archivos.</h2>
+          <p className="lead">Los docuemtnos en formato PDF reciben automáticamente la marca de agua <strong>POLICIA BOLIVIANA</strong> antes de guardarse.</p>
         </div>
         <div className="protection-card">
           <span className="shield">⌾</span>
@@ -165,6 +167,22 @@ export default function App() {
           </tbody></table></div>
         ) : <p className="empty-state">No hay archivos en el repositorio todavía.</p>}
       </section>
+      <footer className="footer-system">
+        <div className="footer-content">
+          <div>
+            <p className="footer-brand">Policía Boliviana Tecnología y Telemática</p>
+            <p className="footer-text">
+              Sistema de Gestión Documental y Archivo Digital.
+            </p>
+          </div>
+          <div className="footer-meta">
+            <span className="footer-badge">Versión 1.0.0</span>
+            <p className="footer-copyright">
+              © 2026 Todos los derechos reservados.
+            </p>
+          </div>
+        </div>
+      </footer>
     </main>
   );
 }
