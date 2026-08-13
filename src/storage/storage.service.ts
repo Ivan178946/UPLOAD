@@ -28,6 +28,7 @@ export interface ObjectMetadata {
   contentType?: string;
   originalName?: string;
   watermarked?: string;
+  originalKey?: string;
 }
 
 @Injectable()
@@ -128,6 +129,7 @@ export class StorageService implements OnModuleInit {
         contentType: result.ContentType,
         originalName: result.Metadata?.originalname,
         watermarked: result.Metadata?.watermarked,
+        originalKey: result.Metadata?.originalkey,
       };
     } catch (error) {
       if (this.isNotFound(error)) {
@@ -152,6 +154,13 @@ export class StorageService implements OnModuleInit {
       ? extension
       : '';
     return `archivos/${date}/${randomUUID()}-${name}${safeExtension}`;
+  }
+
+  createOriginalKey(key: string): string {
+    if (!key.startsWith('archivos/')) {
+      throw new BadRequestException('La ubicación del archivo no es válida.');
+    }
+    return `originales/${key.substring('archivos/'.length)}`;
   }
 
   encodeId(key: string): string {

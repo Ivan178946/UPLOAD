@@ -20,6 +20,13 @@ function messageFrom(response, fallback) {
     .catch(() => fallback);
 }
 
+function normaliseSearch(value) {
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+}
+
 export default function App() {
   const [selectedFiles, setSelectedFiles] = useState([]);
   const [storedFiles, setStoredFiles] = useState([]);
@@ -27,7 +34,13 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(true);
   const [dragging, setDragging] = useState(false);
   const [notice, setNotice] = useState(null);
+  const [searchTerm, setSearchTerm] = useState('');
   const inputRef = useRef(null);
+
+  const filteredFiles = storedFiles.filter((file) => {
+    const term = normaliseSearch(searchTerm.trim());
+    return !term || normaliseSearch(`${file.fileName} ${file.contentType}`).includes(term);
+  });
 
   const refreshFiles = async () => {
     setIsLoading(true);
@@ -160,11 +173,11 @@ export default function App() {
       {notice && <p className={`notice ${notice.type}`} role="status">{notice.text}</p>}
 
       <section className="archive-section" aria-label="Archivos almacenados">
-        <div className="section-heading"><div><p className="eyebrow">MinIO S3 privado</p><h2>Archivos almacenados</h2></div><button className="icon-button" type="button" onClick={refreshFiles} disabled={isLoading} aria-label="Actualizar lista">↻</button></div>
+        <div className="section-heading"><div><p className="eyebrow">MinIO S3 privado</p><h2>Archivos almacenados</h2></div><div className="archive-tools"><input className="file-search" type="search" value={searchTerm} onChange={(event) => setSearchTerm(event.target.value)} placeholder="Buscar por nombre o formato" aria-label="Buscar archivos almacenados" /><button className="icon-button" type="button" onClick={refreshFiles} disabled={isLoading} aria-label="Actualizar lista">↻</button></div></div>
         {isLoading ? <p className="empty-state">Actualizando el archivo…</p> : storedFiles.length ? (
-          <div className="file-table-wrap"><table><thead><tr><th>Archivo</th><th>Protección</th><th>Tamaño</th><th>Fecha</th><th aria-label="Acciones" /></tr></thead><tbody>
-            {storedFiles.map((file) => <tr key={file.id}><td><strong>{file.fileName}</strong><small>{file.contentType}</small></td><td>{file.watermarked ? <span className="badge protected">PDF con marca</span> : <span className="badge">Almacenado</span>}</td><td>{readableSize(file.size)}</td><td>{new Intl.DateTimeFormat('es-BO', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(file.uploadedAt))}</td><td className="actions"><a href={file.downloadUrl}>Descargar</a><button type="button" onClick={() => remove(file)}>Eliminar</button></td></tr>)}
-          </tbody></table></div>
+          filteredFiles.length ? <div className="file-table-wrap"><table><thead><tr><th>Archivo</th><th>Protección</th><th>Tamaño</th><th>Fecha</th><th aria-label="Acciones" /></tr></thead><tbody>
+            {filteredFiles.map((file) => <tr key={file.id}><td><strong>{file.fileName}</strong><small>{file.contentType}</small></td><td>{file.watermarked ? <span className="badge protected">PDF con marca</span> : <span className="badge">Almacenado</span>}</td><td>{readableSize(file.size)}</td><td>{new Intl.DateTimeFormat('es-BO', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(file.uploadedAt))}</td><td className="actions">{file.watermarked ? <><a href={file.downloadUrl}>Con marca</a>{file.originalDownloadUrl && <a href={file.originalDownloadUrl}>Sin marca</a>}</> : <a href={file.downloadUrl}>Descargar</a>}<button type="button" onClick={() => remove(file)}>Eliminar</button></td></tr>)}
+          </tbody></table></div> : <p className="empty-state">No se encontraron archivos que coincidan con la búsqueda.</p>
         ) : <p className="empty-state">No hay archivos en el repositorio todavía.</p>}
       </section>
       <footer className="footer-system">

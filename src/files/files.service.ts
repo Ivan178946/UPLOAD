@@ -20,6 +20,7 @@ export interface StoredFile {
   uploadedAt: string;
   watermarked: boolean;
   downloadUrl: string;
+  originalDownloadUrl?: string;
 }
 
 @Injectable()
@@ -57,16 +58,41 @@ export class FilesService {
           object.size,
           object.lastModified?.toISOString() || new Date().toISOString(),
           metadata.watermarked === 'true',
+          Boolean(metadata.originalKey),
         );
       }),
     );
   }
 
-  async download(id: string, response: Response): Promise<void> {
+  async download(
+    id: string,
+    response: Response,
+    version?: string,
+  ): Promise<void> {
+    if (version && version !== 'original' && version !== 'watermarked') {
+      throw new BadRequestException('La versión solicitada no es válida.');
+    }
+
     const key = this.storage.decodeId(id);
-    const object = await this.storage.get(key);
     const metadata = await this.storage.metadata(key);
     const fileName = this.originalName(key, metadata.originalName);
+    const originalRequested = version === 'original';
+
+    if (originalRequested && metadata.watermarked !== 'true') {
+      throw new BadRequestException(
+        'Solo los PDF protegidos tienen una copia sin marca de agua.',
+      );
+    }
+
+    if (originalRequested && !metadata.originalKey) {
+      throw new NotFoundException(
+        'La copia sin marca de agua no está disponible para este PDF.',
+      );
+    }
+
+    const object = await this.storage.get(
+      originalRequested ? metadata.originalKey! : key,
+    );
 
     try {
       response.setHeader(
@@ -98,7 +124,11 @@ export class FilesService {
 
   async remove(id: string): Promise<void> {
     const key = this.storage.decodeId(id);
-    await this.storage.remove(key);
+    const metadata = await this.storage.metadata(key);
+    await Promise.all([
+      this.storage.remove(key),
+      ...(metadata.originalKey ? [this.storage.remove(metadata.originalKey)] : []),
+    ]);
   }
 
   private async store(file: Express.Multer.File): Promise<StoredFile> {
@@ -109,9 +139,44 @@ export class FilesService {
       : file.mimetype || 'application/octet-stream';
     const key = this.storage.createKey(file.originalname);
 
+    if (pdf) {
+      const originalKey = this.storage.createOriginalKey(key);
+      await this.storage.put(originalKey, file.buffer, contentType, {
+        originalName: encodeURIComponent(file.originalname),
+        original: 'true',
+      });
+
+      try {
+        await this.storage.put(key, contents, contentType, {
+          originalName: encodeURIComponent(file.originalname),
+          watermarked: 'true',
+          originalKey,
+        });
+      } catch (error) {
+        try {
+          await this.storage.remove(originalKey);
+        } catch (cleanupError) {
+          this.logger.error(
+            `No se pudo limpiar la copia original: ${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}`,
+          );
+        }
+        throw error;
+      }
+
+      return this.toStoredFile(
+        key,
+        file.originalname,
+        contentType,
+        contents.length,
+        new Date().toISOString(),
+        true,
+        true,
+      );
+    }
+
     await this.storage.put(key, contents, contentType, {
       originalName: encodeURIComponent(file.originalname),
-      watermarked: String(pdf),
+      watermarked: 'false',
     });
 
     return this.toStoredFile(
@@ -120,7 +185,7 @@ export class FilesService {
       contentType,
       contents.length,
       new Date().toISOString(),
-      pdf,
+      false,
     );
   }
 
@@ -137,7 +202,7 @@ export class FilesService {
     form.append('watermarkText', WATERMARK_TEXT);
     form.append('alphabet', 'roman');
     form.append('fontSize', '44');
-    form.append('rotation', '45');
+    form.append('rotation', '0'); 
     form.append('opacity', '0.22');
     form.append('widthSpacer', '80');
     form.append('heightSpacer', '80');
@@ -200,8 +265,10 @@ export class FilesService {
     size: number,
     uploadedAt: string,
     watermarked: boolean,
+    originalAvailable = false,
   ): StoredFile {
     const id = this.storage.encodeId(key);
+    const downloadUrl = `/api/files/${id}`;
     return {
       id,
       fileName,
@@ -209,7 +276,10 @@ export class FilesService {
       size,
       uploadedAt,
       watermarked,
-      downloadUrl: `/api/files/${id}`,
+      downloadUrl,
+      originalDownloadUrl: originalAvailable
+        ? `${downloadUrl}?version=original`
+        : undefined,
     };
   }
 

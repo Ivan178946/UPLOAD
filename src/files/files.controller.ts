@@ -6,6 +6,7 @@ import {
   HttpStatus,
   Param,
   Post,
+  Query,
   Res,
   UploadedFiles,
   UseInterceptors,
@@ -76,10 +77,18 @@ export class FilesController {
     return this.filesService.list();
   }
 
-  @ApiOperation({ summary: 'Descarga un archivo desde MinIO a través del API' })
+  @ApiOperation({
+    summary: 'Descarga un archivo desde MinIO a través del API',
+    description:
+      'Para PDF nuevos, use version=original para descargar la copia sin marca de agua.',
+  })
   @Get(':id')
-  download(@Param('id') id: string, @Res() response: Response) {
-    return this.filesService.download(id, response);
+  download(
+    @Param('id') id: string,
+    @Query('version') version: string | undefined,
+    @Res() response: Response,
+  ) {
+    return this.filesService.download(id, response, version);
   }
 
   @ApiOperation({ summary: 'Elimina un archivo de MinIO' })
