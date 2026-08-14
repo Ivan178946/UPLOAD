@@ -11,6 +11,14 @@ import { Response } from 'express';
 import { StorageService } from '../storage/storage.service';
 
 const WATERMARK_TEXT = 'POLICIA BOLIVIANA';
+const MAX_WATERMARK_TEXT_LENGTH = 120;
+
+type PdfMode = 'original' | 'watermarked';
+
+interface UploadOptions {
+  pdfMode?: string;
+  watermarkText?: string;
+}
 
 export interface StoredFile {
   id: string;
@@ -20,7 +28,7 @@ export interface StoredFile {
   uploadedAt: string;
   watermarked: boolean;
   downloadUrl: string;
-  originalDownloadUrl?: string;
+  viewUrl: string;
 }
 
 @Injectable()
@@ -29,13 +37,20 @@ export class FilesService {
 
   constructor(private readonly storage: StorageService) {}
 
-  async upload(files: Express.Multer.File[]): Promise<StoredFile[]> {
+  async upload(
+    files: Express.Multer.File[],
+    input: UploadOptions = {},
+  ): Promise<StoredFile[]> {
     if (!files?.length) {
       throw new BadRequestException('Debe seleccionar al menos un archivo.');
     }
 
+    const options = this.normaliseUploadOptions(input);
+
     try {
-      const results = await Promise.all(files.map((file) => this.store(file)));
+      const results = await Promise.all(
+        files.map((file) => this.store(file, options)),
+      );
       this.logger.log(`Se almacenaron ${results.length} archivos en MinIO.`);
       return results;
     } catch (error) {
@@ -58,7 +73,6 @@ export class FilesService {
           object.size,
           object.lastModified?.toISOString() || new Date().toISOString(),
           metadata.watermarked === 'true',
-          Boolean(metadata.originalKey),
         );
       }),
     );
@@ -67,37 +81,18 @@ export class FilesService {
   async download(
     id: string,
     response: Response,
-    version?: string,
+    disposition?: string,
   ): Promise<void> {
-    if (version && version !== 'original' && version !== 'watermarked') {
-      throw new BadRequestException('La versión solicitada no es válida.');
-    }
-
     const key = this.storage.decodeId(id);
     const metadata = await this.storage.metadata(key);
     const fileName = this.originalName(key, metadata.originalName);
-    const originalRequested = version === 'original';
-
-    if (originalRequested && metadata.watermarked !== 'true') {
-      throw new BadRequestException(
-        'Solo los PDF protegidos tienen una copia sin marca de agua.',
-      );
-    }
-
-    if (originalRequested && !metadata.originalKey) {
-      throw new NotFoundException(
-        'La copia sin marca de agua no está disponible para este PDF.',
-      );
-    }
-
-    const object = await this.storage.get(
-      originalRequested ? metadata.originalKey! : key,
-    );
+    const object = await this.storage.get(key);
+    const contentDisposition = disposition === 'inline' ? 'inline' : 'attachment';
 
     try {
       response.setHeader(
         'Content-Disposition',
-        `attachment; filename*=UTF-8''${encodeURIComponent(fileName)}`,
+        `${contentDisposition}; filename*=UTF-8''${encodeURIComponent(fileName)}`,
       );
       response.setHeader(
         'Content-Type', metadata.contentType || 'application/octet-stream');
@@ -131,52 +126,23 @@ export class FilesService {
     ]);
   }
 
-  private async store(file: Express.Multer.File): Promise<StoredFile> {
+  private async store(
+    file: Express.Multer.File,
+    options: { pdfMode: PdfMode; watermarkText: string },
+  ): Promise<StoredFile> {
     const pdf = this.isPdf(file);
-    const contents = pdf ? await this.addWatermark(file) : file.buffer;
+    const watermarked = pdf && options.pdfMode === 'watermarked';
+    const contents = watermarked
+      ? await this.addWatermark(file, options.watermarkText)
+      : file.buffer;
     const contentType = pdf
       ? 'application/pdf'
       : file.mimetype || 'application/octet-stream';
     const key = this.storage.createKey(file.originalname);
 
-    if (pdf) {
-      const originalKey = this.storage.createOriginalKey(key);
-      await this.storage.put(originalKey, file.buffer, contentType, {
-        originalName: encodeURIComponent(file.originalname),
-        original: 'true',
-      });
-
-      try {
-        await this.storage.put(key, contents, contentType, {
-          originalName: encodeURIComponent(file.originalname),
-          watermarked: 'true',
-          originalKey,
-        });
-      } catch (error) {
-        try {
-          await this.storage.remove(originalKey);
-        } catch (cleanupError) {
-          this.logger.error(
-            `No se pudo limpiar la copia original: ${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}`,
-          );
-        }
-        throw error;
-      }
-
-      return this.toStoredFile(
-        key,
-        file.originalname,
-        contentType,
-        contents.length,
-        new Date().toISOString(),
-        true,
-        true,
-      );
-    }
-
     await this.storage.put(key, contents, contentType, {
       originalName: encodeURIComponent(file.originalname),
-      watermarked: 'false',
+      watermarked: String(watermarked),
     });
 
     return this.toStoredFile(
@@ -185,11 +151,14 @@ export class FilesService {
       contentType,
       contents.length,
       new Date().toISOString(),
-      false,
+      watermarked,
     );
   }
 
-  private async addWatermark(file: Express.Multer.File): Promise<Buffer> {
+  private async addWatermark(
+    file: Express.Multer.File,
+    watermarkText: string,
+  ): Promise<Buffer> {
     const form = new FormData();
     form.append(
       'fileInput',
@@ -199,7 +168,7 @@ export class FilesService {
     form.append('customColor', '#000000'); 
     form.append('watermarkColor', '#000000');
     form.append('watermarkType', 'text');
-    form.append('watermarkText', WATERMARK_TEXT);
+    form.append('watermarkText', watermarkText);
     form.append('alphabet', 'roman');
     form.append('fontSize', '44');
     form.append('rotation', '0'); 
@@ -251,6 +220,28 @@ export class FilesService {
     }
   }
 
+  private normaliseUploadOptions(input: UploadOptions): {
+    pdfMode: PdfMode;
+    watermarkText: string;
+  } {
+    const pdfMode = input.pdfMode || 'watermarked';
+    if (pdfMode !== 'original' && pdfMode !== 'watermarked') {
+      throw new BadRequestException('El modo de almacenamiento para PDF no es válido.');
+    }
+
+    const watermarkText = (input.watermarkText || WATERMARK_TEXT).trim();
+    if (pdfMode === 'watermarked' && !watermarkText) {
+      throw new BadRequestException('La marca de agua para PDF no puede estar vacía.');
+    }
+    if (watermarkText.length > MAX_WATERMARK_TEXT_LENGTH) {
+      throw new BadRequestException(
+        `La marca de agua no puede superar ${MAX_WATERMARK_TEXT_LENGTH} caracteres.`,
+      );
+    }
+
+    return { pdfMode, watermarkText };
+  }
+
   private isPdf(file: Express.Multer.File): boolean {
     return (
       file.mimetype === 'application/pdf' ||
@@ -265,7 +256,6 @@ export class FilesService {
     size: number,
     uploadedAt: string,
     watermarked: boolean,
-    originalAvailable = false,
   ): StoredFile {
     const id = this.storage.encodeId(key);
     const downloadUrl = `/api/files/${id}`;
@@ -277,9 +267,7 @@ export class FilesService {
       uploadedAt,
       watermarked,
       downloadUrl,
-      originalDownloadUrl: originalAvailable
-        ? `${downloadUrl}?version=original`
-        : undefined,
+      viewUrl: `${downloadUrl}?disposition=inline`,
     };
   }
 

@@ -1,4 +1,5 @@
 import {
+  Body,
   Controller,
   Delete,
   Get,
@@ -34,7 +35,7 @@ export class FilesController {
   @ApiOperation({
     summary: 'Sube archivos de cualquier formato a MinIO',
     description:
-      'Los PDF se procesan obligatoriamente con Stirling PDF y se guardan con la marca de agua POLICIA BOLIVIANA.',
+      'Los PDF pueden guardarse originales o procesarse con una marca de agua personalizada. Los demás formatos se almacenan sin modificaciones.',
   })
   @ApiConsumes('multipart/form-data')
   @ApiBody({
@@ -46,6 +47,17 @@ export class FilesController {
           type: 'array',
           maxItems: MAX_FILES_PER_REQUEST,
           items: { type: 'string', format: 'binary' },
+        },
+        pdfMode: {
+          type: 'string',
+          enum: ['original', 'watermarked'],
+          default: 'watermarked',
+          description: 'Modo de almacenamiento para los archivos PDF.',
+        },
+        watermarkText: {
+          type: 'string',
+          maxLength: 120,
+          description: 'Texto de la marca de agua cuando pdfMode es watermarked.',
         },
       },
     },
@@ -67,8 +79,10 @@ export class FilesController {
   )
   upload(
     @UploadedFiles() files: Array<Express.Multer.File>,
+    @Body('pdfMode') pdfMode?: string,
+    @Body('watermarkText') watermarkText?: string,
   ) {
-    return this.filesService.upload(files);
+    return this.filesService.upload(files, { pdfMode, watermarkText });
   }
 
   @ApiOperation({ summary: 'Lista los últimos archivos almacenados' })
@@ -78,17 +92,15 @@ export class FilesController {
   }
 
   @ApiOperation({
-    summary: 'Descarga un archivo desde MinIO a través del API',
-    description:
-      'Para PDF nuevos, use version=original para descargar la copia sin marca de agua.',
+    summary: 'Visualiza o descarga un archivo desde MinIO a través del API',
   })
   @Get(':id')
   download(
     @Param('id') id: string,
-    @Query('version') version: string | undefined,
+    @Query('disposition') disposition: string | undefined,
     @Res() response: Response,
   ) {
-    return this.filesService.download(id, response, version);
+    return this.filesService.download(id, response, disposition);
   }
 
   @ApiOperation({ summary: 'Elimina un archivo de MinIO' })

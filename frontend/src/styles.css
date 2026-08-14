@@ -204,6 +204,37 @@ h1 { margin-bottom: 0; font-size: 1.08rem; letter-spacing: -.02em; color: var(--
 .selection-list strong { font-size: .76rem; color: var(--policia-texto-oscuro); }
 .selection-list small { margin-top: 3px; color: var(--policia-texto-suave); font-size: .67rem; }
 
+.pdf-options {
+  margin: 4px 0 14px;
+  padding: 12px;
+  border: 1px solid #d1d9d3;
+  border-radius: 9px;
+  background: #f8faf8;
+}
+.pdf-options legend {
+  padding: 0 4px;
+  color: var(--policia-verde-oscuro);
+  font-size: .73rem;
+  font-weight: 800;
+}
+.checkbox-option { display: flex; align-items: flex-start; gap: 8px; cursor: pointer; }
+.checkbox-option input { margin: 3px 0 0; accent-color: var(--policia-verde-olivo); }
+.checkbox-option strong, .checkbox-option small { display: block; }
+.checkbox-option strong { color: var(--policia-texto-oscuro); font-size: .73rem; }
+.checkbox-option small { margin-top: 3px; color: var(--policia-texto-suave); font-size: .66rem; line-height: 1.35; }
+.watermark-input { display: block; margin-top: 11px; color: var(--policia-texto-suave); font-size: .69rem; font-weight: 750; }
+.watermark-input span { display: block; margin-bottom: 5px; }
+.watermark-input input {
+  width: 100%;
+  padding: 8px 9px;
+  color: var(--policia-texto-oscuro);
+  border: 1px solid #cdd7cf;
+  border-radius: 7px;
+  background: var(--policia-blanco);
+  font-size: .76rem;
+}
+.watermark-input input:focus { outline: 2px solid rgba(92, 141, 103, .35); border-color: var(--policia-verde-claro); }
+
 .empty-state { margin: auto 0; color: var(--policia-texto-suave); font-size: .86rem; line-height: 1.5; }
 
 .notice { margin: 18px 0 0; padding: 12px 15px; border-radius: 9px; font-size: .85rem; font-weight: 650; }

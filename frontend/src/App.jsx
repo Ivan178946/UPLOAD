@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import PB from './img/PB.jpeg';
+import escudo from './img/CARCANCHO-FINAL.png';
 const MAX_FILE_SIZE = 50 * 1024 * 1024;
 const MAX_FILES = 10;
+const DEFAULT_WATERMARK_TEXT = 'POLICIA BOLIVIANA'; 
 
 function readableSize(size) {
   if (!size) return '0 B';
@@ -27,6 +29,15 @@ function normaliseSearch(value) {
     .toLowerCase();
 }
 
+function isPdf(file) {
+  const name = file?.name || file?.fileName || '';
+  return (
+    file?.type === 'application/pdf' ||
+    file?.contentType === 'application/pdf' ||
+    name.toLowerCase().endsWith('.pdf')
+  );
+}
+
 export default function App() {
   const [selectedFiles, setSelectedFiles] = useState([]);
   const [storedFiles, setStoredFiles] = useState([]);
@@ -35,7 +46,11 @@ export default function App() {
   const [dragging, setDragging] = useState(false);
   const [notice, setNotice] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
+  const [storeOriginalPdf, setStoreOriginalPdf] = useState(false);
+  const [watermarkText, setWatermarkText] = useState(DEFAULT_WATERMARK_TEXT);
   const inputRef = useRef(null);
+
+  const selectedPdfFiles = selectedFiles.filter(isPdf);
 
   const filteredFiles = storedFiles.filter((file) => {
     const term = normaliseSearch(searchTerm.trim());
@@ -69,6 +84,8 @@ export default function App() {
     const chosen = candidates.slice(0, MAX_FILES);
     if (!chosen.length) return;
     setSelectedFiles(chosen);
+    setStoreOriginalPdf(false);
+    setWatermarkText(DEFAULT_WATERMARK_TEXT);
     setNotice(
       candidates.length > MAX_FILES
         ? { type: 'error', text: `Solo se prepararon los primeros ${MAX_FILES} archivos.` }
@@ -78,10 +95,18 @@ export default function App() {
 
   const upload = async () => {
     if (!selectedFiles.length || isUploading) return;
+    if (selectedPdfFiles.length && !storeOriginalPdf && !watermarkText.trim()) {
+      setNotice({ type: 'error', text: 'Ingrese el texto de la marca de agua para los PDF.' });
+      return;
+    }
     setIsUploading(true);
     setNotice(null);
     const body = new FormData();
     selectedFiles.forEach((file) => body.append('files', file));
+    if (selectedPdfFiles.length) {
+      body.append('pdfMode', storeOriginalPdf ? 'original' : 'watermarked');
+      if (!storeOriginalPdf) body.append('watermarkText', watermarkText.trim());
+    }
 
     try {
       const response = await fetch('/api/files', { method: 'POST', body });
@@ -89,10 +114,12 @@ export default function App() {
       const result = await response.json();
       const protectedCount = result.filter((file) => file.watermarked).length;
       setSelectedFiles([]);
+      setStoreOriginalPdf(false);
+      setWatermarkText(DEFAULT_WATERMARK_TEXT);
       if (inputRef.current) inputRef.current.value = '';
       setNotice({
         type: 'success',
-        text: `${result.length} archivo(s) almacenado(s). ${protectedCount ? `${protectedCount} PDF(s) protegidos con marca de agua.` : ''}`,
+        text: `${result.length} archivo(s) almacenado(s). ${protectedCount ? `${protectedCount} PDF(s) protegidos con marca de agua.` : selectedPdfFiles.length ? `${selectedPdfFiles.length} PDF(s) originales almacenados sin marca.` : ''}`,
       });
       await refreshFiles();
     } catch (error) {
@@ -132,7 +159,7 @@ export default function App() {
         <div>
           <p className="eyebrow">Gestión documental</p>
           <h2>Resguardo de archivos.</h2>
-          <p className="lead">Los docuemtnos en formato PDF reciben automáticamente la marca de agua <strong>POLICIA BOLIVIANA</strong> antes de guardarse.</p>
+          <p className="lead">Los documentos PDF pueden guardarse como originales o con una marca de agua personalizada. Los demás formatos se almacenan sin modificaciones.</p>
         </div>
         <div className="protection-card">
           <span className="shield">⌾</span>
@@ -160,10 +187,25 @@ export default function App() {
           {selectedFiles.length ? (
             <ul className="selection-list">
               {selectedFiles.map((file) => (
-                <li key={`${file.name}-${file.lastModified}`}><span className="file-icon">{file.name.toLowerCase().endsWith('.pdf') ? 'PDF' : 'FILE'}</span><div><strong>{file.name}</strong><small>{readableSize(file.size)} {file.name.toLowerCase().endsWith('.pdf') && '· se marcará'}</small></div></li>
+                <li key={`${file.name}-${file.lastModified}`}><span className="file-icon">{isPdf(file) ? 'PDF' : 'FILE'}</span><div><strong>{file.name}</strong><small>{readableSize(file.size)} {isPdf(file) && `· ${storeOriginalPdf ? 'original sin marca' : 'con marca personalizada'}`}</small></div></li>
               ))}
             </ul>
           ) : <p className="empty-state">Aún no hay archivos seleccionados.</p>}
+          {selectedPdfFiles.length > 0 && (
+            <fieldset className="pdf-options">
+              <legend>Opciones para {selectedPdfFiles.length} PDF{selectedPdfFiles.length > 1 ? 's' : ''}</legend>
+              <label className="checkbox-option">
+                <input type="checkbox" checked={storeOriginalPdf} onChange={(event) => setStoreOriginalPdf(event.target.checked)} disabled={isUploading} />
+                <span><strong>Almacenar PDF original (sin marca de agua)</strong><small>Al desmarcarlo, se aplicará una marca de agua personalizada.</small></span>
+              </label>
+              {!storeOriginalPdf && (
+                <label className="watermark-input">
+                  <span>Personalizar marca de agua</span>
+                  <input type="text" value={watermarkText} onChange={(event) => setWatermarkText(event.target.value)} maxLength="120" disabled={isUploading} aria-label="Texto de la marca de agua" />
+                </label>
+              )}
+            </fieldset>
+          )}
           <button className="primary-button" type="button" onClick={upload} disabled={!selectedFiles.length || isUploading}>
             {isUploading ? 'Procesando y guardando…' : 'Subir al archivo seguro'}
           </button>
@@ -175,8 +217,8 @@ export default function App() {
       <section className="archive-section" aria-label="Archivos almacenados">
         <div className="section-heading"><div><p className="eyebrow">MinIO S3 privado</p><h2>Archivos almacenados</h2></div><div className="archive-tools"><input className="file-search" type="search" value={searchTerm} onChange={(event) => setSearchTerm(event.target.value)} placeholder="Buscar por nombre o formato" aria-label="Buscar archivos almacenados" /><button className="icon-button" type="button" onClick={refreshFiles} disabled={isLoading} aria-label="Actualizar lista">↻</button></div></div>
         {isLoading ? <p className="empty-state">Actualizando el archivo…</p> : storedFiles.length ? (
-          filteredFiles.length ? <div className="file-table-wrap"><table><thead><tr><th>Archivo</th><th>Protección</th><th>Tamaño</th><th>Fecha</th><th aria-label="Acciones" /></tr></thead><tbody>
-            {filteredFiles.map((file) => <tr key={file.id}><td><strong>{file.fileName}</strong><small>{file.contentType}</small></td><td>{file.watermarked ? <span className="badge protected">PDF con marca</span> : <span className="badge">Almacenado</span>}</td><td>{readableSize(file.size)}</td><td>{new Intl.DateTimeFormat('es-BO', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(file.uploadedAt))}</td><td className="actions">{file.watermarked ? <><a href={file.downloadUrl}>Con marca</a>{file.originalDownloadUrl && <a href={file.originalDownloadUrl}>Sin marca</a>}</> : <a href={file.downloadUrl}>Descargar</a>}<button type="button" onClick={() => remove(file)}>Eliminar</button></td></tr>)}
+          filteredFiles.length ? <div className="file-table-wrap"><table><thead><tr><th>Archivo</th><th>Protección</th><th>Tamaño</th><th>Fecha</th><th aria-label="Acciones" /></tr></thead><tbody><tr><th>Acciones</th></tr>
+            {filteredFiles.map((file) => <tr key={file.id}><td><strong>{file.fileName}</strong><small>{file.contentType}</small></td><td>{file.watermarked ? <span className="badge protected">PDF con marca</span> : isPdf(file) ? <span className="badge">PDF original</span> : <span className="badge">Almacenado</span>}</td><td>{readableSize(file.size)}</td><td>{new Intl.DateTimeFormat('es-BO', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(file.uploadedAt))}</td><td className="actions"><a href={file.viewUrl || `${file.downloadUrl}?disposition=inline`} target="_blank" rel="noreferrer">Ver archivo</a><a href={file.downloadUrl}>Descargar</a><button type="button" onClick={() => remove(file)}>Eliminar</button></td></tr>)}
           </tbody></table></div> : <p className="empty-state">No se encontraron archivos que coincidan con la búsqueda.</p>
         ) : <p className="empty-state">No hay archivos en el repositorio todavía.</p>}
       </section>
