@@ -59,6 +59,18 @@ export class FilesController {
           maxLength: 120,
           description: 'Texto de la marca de agua cuando pdfMode es watermarked.',
         },
+        retentionMode: {
+          type: 'string',
+          enum: ['permanent', 'temporary'],
+          default: 'permanent',
+          description:
+            'Política de conservación: almacenamiento permanente o por un lapso de tiempo definido por el usuario.',
+        },
+        retentionDays: {
+          type: 'number',
+          description:
+            'Cantidad de días que se conservará el archivo cuando retentionMode es temporary.',
+        },
       },
     },
   })
@@ -81,8 +93,15 @@ export class FilesController {
     @UploadedFiles() files: Array<Express.Multer.File>,
     @Body('pdfMode') pdfMode?: string,
     @Body('watermarkText') watermarkText?: string,
+    @Body('retentionMode') retentionMode?: string,
+    @Body('retentionDays') retentionDays?: string,
   ) {
-    return this.filesService.upload(files, { pdfMode, watermarkText });
+    return this.filesService.upload(files, {
+      pdfMode,
+      watermarkText,
+      retentionMode,
+      retentionDays,
+    });
   }
 
   @ApiOperation({ summary: 'Lista los últimos archivos almacenados' })

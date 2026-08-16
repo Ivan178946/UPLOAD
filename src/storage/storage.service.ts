@@ -29,6 +29,14 @@ export interface ObjectMetadata {
   originalName?: string;
   watermarked?: string;
   originalKey?: string;
+  /** 'true' si el objeto se guarda comprimido (gzip) de forma transparente y sin pérdida de calidad. */
+  compressed?: string;
+  /** Tamaño real del archivo original (sin comprimir), en bytes, como texto. */
+  originalSize?: string;
+  /** 'permanent' | 'temporary' — política de conservación elegida por el usuario. */
+  retention?: string;
+  /** Fecha ISO en la que el archivo temporal debe eliminarse automáticamente. */
+  expiresAt?: string;
 }
 
 @Injectable()
@@ -99,25 +107,39 @@ export class StorageService implements OnModuleInit {
   }
 
   async list(): Promise<ObjectSummary[]> {
-    const result = await this.client.send(
-      new ListObjectsV2Command({
-        Bucket: this.bucket,
-        Prefix: 'archivos/',
-        MaxKeys: 100,
-      }),
-    );
-    return (result.Contents || [])
-      .filter((entry) => entry.Key)
-      .map((entry) => ({
-        key: entry.Key as string,
-        size: entry.Size || 0,
-        lastModified: entry.LastModified,
-      }))
-      .sort(
-        (first, second) =>
-          (second.lastModified?.getTime() || 0) -
-          (first.lastModified?.getTime() || 0),
+    const objects: ObjectSummary[] = [];
+    let continuationToken: string | undefined;
+    const MAX_OBJECTS = 5000; // límite de seguridad para evitar listados descontrolados
+
+    do {
+      const result = await this.client.send(
+        new ListObjectsV2Command({
+          Bucket: this.bucket,
+          Prefix: 'archivos/',
+          MaxKeys: 1000,
+          ContinuationToken: continuationToken,
+        }),
       );
+
+      for (const entry of result.Contents || []) {
+        if (!entry.Key) continue;
+        objects.push({
+          key: entry.Key,
+          size: entry.Size || 0,
+          lastModified: entry.LastModified,
+        });
+      }
+
+      continuationToken = result.IsTruncated
+        ? result.NextContinuationToken
+        : undefined;
+    } while (continuationToken && objects.length < MAX_OBJECTS);
+
+    return objects.sort(
+      (first, second) =>
+        (second.lastModified?.getTime() || 0) -
+        (first.lastModified?.getTime() || 0),
+    );
   }
 
   async metadata(key: string): Promise<ObjectMetadata> {
@@ -130,6 +152,10 @@ export class StorageService implements OnModuleInit {
         originalName: result.Metadata?.originalname,
         watermarked: result.Metadata?.watermarked,
         originalKey: result.Metadata?.originalkey,
+        compressed: result.Metadata?.compressed,
+        originalSize: result.Metadata?.originalsize,
+        retention: result.Metadata?.retention,
+        expiresAt: result.Metadata?.expiresat,
       };
     } catch (error) {
       if (this.isNotFound(error)) {

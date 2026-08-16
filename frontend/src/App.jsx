@@ -1,9 +1,20 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import PB from './img/PB.jpeg';
-import escudo from './img/CARCANCHO-FINAL.png';
+import escudo from './img/CARCANCHO-FINAL.png'
 const MAX_FILE_SIZE = 50 * 1024 * 1024;
 const MAX_FILES = 10;
-const DEFAULT_WATERMARK_TEXT = 'POLICIA BOLIVIANA'; 
+const DEFAULT_WATERMARK_TEXT = 'POLICIA BOLIVIANA';
+const PAGE_SIZE = 10;
+const RETENTION_PRESETS = [
+  { value: '1', label: '1 día' },
+  { value: '7', label: '7 días' },
+  { value: '15', label: '15 días' },
+  { value: '30', label: '30 días' },
+  { value: '90', label: '90 días' },
+  { value: '180', label: '180 días' },
+  { value: '365', label: '1 año' },
+  { value: 'custom', label: 'Personalizado…' },
+];
 
 function readableSize(size) {
   if (!size) return '0 B';
@@ -38,6 +49,64 @@ function isPdf(file) {
   );
 }
 
+function fileExtension(fileName) {
+  const name = fileName || '';
+  const lastDot = name.lastIndexOf('.');
+  if (lastDot === -1 || lastDot === name.length - 1) return 'sin-extension';
+  return name.slice(lastDot + 1).toLowerCase();
+}
+
+function formatDate(value) {
+  return new Intl.DateTimeFormat('es-BO', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value));
+}
+
+/* ---------- Iconos en línea (sin dependencias externas) ---------- */
+function EyeIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M1.5 12S5 5 12 5s10.5 7 10.5 7-3.5 7-10.5 7S1.5 12 1.5 12Z" />
+      <circle cx="12" cy="12" r="3.2" />
+    </svg>
+  );
+}
+function DownloadIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M12 3v12" />
+      <path d="M7 10l5 5 5-5" />
+      <path d="M4 19.5h16" />
+    </svg>
+  );
+}
+function TrashIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M4 7h16" />
+      <path d="M9 7V4.6C9 4 9.4 3.5 10 3.5h4c.6 0 1 .5 1 1.1V7" />
+      <path d="M6 7l1 12.3c0 .9.7 1.7 1.7 1.7h6.6c1 0 1.7-.8 1.7-1.7L18 7" />
+      <path d="M10 11v6" />
+      <path d="M14 11v6" />
+    </svg>
+  );
+}
+function ClockIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 7v5l3.2 2" />
+    </svg>
+  );
+}
+function ShieldIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M12 2.5l8 3v5.6c0 5-3.4 8.4-8 10.4-4.6-2-8-5.4-8-10.4V5.5l8-3Z" />
+      <path d="M8.4 12.2l2.4 2.4 4.8-4.8" />
+    </svg>
+  );
+}
+/* ------------------------------------------------------------------ */
+
 export default function App() {
   const [selectedFiles, setSelectedFiles] = useState([]);
   const [storedFiles, setStoredFiles] = useState([]);
@@ -46,16 +115,46 @@ export default function App() {
   const [dragging, setDragging] = useState(false);
   const [notice, setNotice] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
+  const [extensionFilter, setExtensionFilter] = useState('all');
+  const [currentPage, setCurrentPage] = useState(1);
   const [storeOriginalPdf, setStoreOriginalPdf] = useState(false);
   const [watermarkText, setWatermarkText] = useState(DEFAULT_WATERMARK_TEXT);
+  const [retentionMode, setRetentionMode] = useState('permanent');
+  const [retentionPreset, setRetentionPreset] = useState('30');
+  const [retentionCustomDays, setRetentionCustomDays] = useState('30');
   const inputRef = useRef(null);
 
   const selectedPdfFiles = selectedFiles.filter(isPdf);
+  const effectiveRetentionDays =
+    retentionPreset === 'custom' ? retentionCustomDays : retentionPreset;
 
-  const filteredFiles = storedFiles.filter((file) => {
+  const availableExtensions = useMemo(() => {
+    const set = new Set(storedFiles.map((file) => fileExtension(file.fileName)));
+    return Array.from(set).sort();
+  }, [storedFiles]);
+
+  const filteredFiles = useMemo(() => {
     const term = normaliseSearch(searchTerm.trim());
-    return !term || normaliseSearch(`${file.fileName} ${file.contentType}`).includes(term);
-  });
+    return storedFiles.filter((file) => {
+      const matchesTerm = !term || normaliseSearch(`${file.fileName} ${file.contentType}`).includes(term);
+      const matchesExtension =
+        extensionFilter === 'all' || fileExtension(file.fileName) === extensionFilter;
+      return matchesTerm && matchesExtension;
+    });
+  }, [storedFiles, searchTerm, extensionFilter]);
+
+  // Requerimiento: si el usuario busca o filtra, la paginación se recalcula
+  // automáticamente y vuelve siempre a la página 1.
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, extensionFilter]);
+
+  const totalItems = filteredFiles.length;
+  const totalPages = Math.max(1, Math.ceil(totalItems / PAGE_SIZE));
+  const safePage = Math.min(currentPage, totalPages);
+  const startIndex = (safePage - 1) * PAGE_SIZE;
+  const endIndex = Math.min(startIndex + PAGE_SIZE, totalItems);
+  const pageFiles = filteredFiles.slice(startIndex, endIndex);
 
   const refreshFiles = async () => {
     setIsLoading(true);
@@ -86,6 +185,9 @@ export default function App() {
     setSelectedFiles(chosen);
     setStoreOriginalPdf(false);
     setWatermarkText(DEFAULT_WATERMARK_TEXT);
+    setRetentionMode('permanent');
+    setRetentionPreset('30');
+    setRetentionCustomDays('30');
     setNotice(
       candidates.length > MAX_FILES
         ? { type: 'error', text: `Solo se prepararon los primeros ${MAX_FILES} archivos.` }
@@ -99,6 +201,13 @@ export default function App() {
       setNotice({ type: 'error', text: 'Ingrese el texto de la marca de agua para los PDF.' });
       return;
     }
+    if (retentionMode === 'temporary') {
+      const days = Number(effectiveRetentionDays);
+      if (!Number.isFinite(days) || days < 1 || days > 3650) {
+        setNotice({ type: 'error', text: 'Indique un lapso de conservación válido (entre 1 y 3650 días).' });
+        return;
+      }
+    }
     setIsUploading(true);
     setNotice(null);
     const body = new FormData();
@@ -106,6 +215,10 @@ export default function App() {
     if (selectedPdfFiles.length) {
       body.append('pdfMode', storeOriginalPdf ? 'original' : 'watermarked');
       if (!storeOriginalPdf) body.append('watermarkText', watermarkText.trim());
+    }
+    body.append('retentionMode', retentionMode);
+    if (retentionMode === 'temporary') {
+      body.append('retentionDays', String(effectiveRetentionDays));
     }
 
     try {
@@ -116,6 +229,9 @@ export default function App() {
       setSelectedFiles([]);
       setStoreOriginalPdf(false);
       setWatermarkText(DEFAULT_WATERMARK_TEXT);
+      setRetentionMode('permanent');
+      setRetentionPreset('30');
+      setRetentionCustomDays('30');
       if (inputRef.current) inputRef.current.value = '';
       setNotice({
         type: 'success',
@@ -156,10 +272,15 @@ export default function App() {
       </header>
 
       <section className="hero">
-        <div>
-          <p className="eyebrow">Gestión documental</p>
-          <h2>Resguardo de archivos.</h2>
-          <p className="lead">Los documentos PDF pueden guardarse como originales o con una marca de agua personalizada. Los demás formatos se almacenan sin modificaciones.</p>
+        <div className="hero-heading">
+          <div className="hero-logo" aria-hidden="true">
+            <img src={escudo} alt="" />
+          </div>
+          <div>
+            <p className="eyebrow">Gestión documental</p>
+            <h2>Resguardo de archivos.</h2>
+            <p className="lead">Los documentos PDF pueden guardarse como originales o con una marca de agua personalizada. Los demás formatos se almacenan sin modificaciones.</p>
+          </div>
         </div>
         <div className="protection-card">
           <span className="shield">⌾</span>
@@ -179,7 +300,7 @@ export default function App() {
           <h3>Arrastre los archivos aquí</h3>
           <p>o seleccione desde el equipo. Se admiten todos los formatos.</p>
           <label className="secondary-button" htmlFor="file-input">Seleccionar archivos</label>
-          <small>Máximo {MAX_FILES} archivos por carga · 50 MB por archivo</small>
+          <small>Máximo {MAX_FILES} archivos por carga · 50 MB por archivo · Compresión automática sin pérdida de calidad</small>
         </div>
 
         <aside className="selection-panel">
@@ -191,6 +312,7 @@ export default function App() {
               ))}
             </ul>
           ) : <p className="empty-state">Aún no hay archivos seleccionados.</p>}
+
           {selectedPdfFiles.length > 0 && (
             <fieldset className="pdf-options">
               <legend>Opciones para {selectedPdfFiles.length} PDF{selectedPdfFiles.length > 1 ? 's' : ''}</legend>
@@ -206,6 +328,66 @@ export default function App() {
               )}
             </fieldset>
           )}
+
+          {selectedFiles.length > 0 && (
+            <fieldset className="retention-options">
+              <legend>Tiempo de conservación</legend>
+              <p className="retention-hint">Defina si el/los archivo(s) permanecerán almacenados de forma permanente o solo por un lapso de tiempo, para resguardar la privacidad de la información.</p>
+              <label className="radio-option">
+                <input
+                  type="radio"
+                  name="retentionMode"
+                  value="permanent"
+                  checked={retentionMode === 'permanent'}
+                  onChange={() => setRetentionMode('permanent')}
+                  disabled={isUploading}
+                />
+                <span><strong>Conservar permanentemente</strong><small>El sistema lo almacena como siempre lo hacía, sin ningún cambio.</small></span>
+              </label>
+              <label className="radio-option">
+                <input
+                  type="radio"
+                  name="retentionMode"
+                  value="temporary"
+                  checked={retentionMode === 'temporary'}
+                  onChange={() => setRetentionMode('temporary')}
+                  disabled={isUploading}
+                />
+                <span><strong>Conservar temporalmente</strong><small>El archivo se elimina automáticamente al vencer el plazo elegido.</small></span>
+              </label>
+
+              {retentionMode === 'temporary' && (
+                <div className="retention-duration">
+                  <label className="retention-select">
+                    <span>Plazo de conservación</span>
+                    <select
+                      value={retentionPreset}
+                      onChange={(event) => setRetentionPreset(event.target.value)}
+                      disabled={isUploading}
+                    >
+                      {RETENTION_PRESETS.map((preset) => (
+                        <option key={preset.value} value={preset.value}>{preset.label}</option>
+                      ))}
+                    </select>
+                  </label>
+                  {retentionPreset === 'custom' && (
+                    <label className="retention-select">
+                      <span>Cantidad de días</span>
+                      <input
+                        type="number"
+                        min="1"
+                        max="3650"
+                        value={retentionCustomDays}
+                        onChange={(event) => setRetentionCustomDays(event.target.value)}
+                        disabled={isUploading}
+                      />
+                    </label>
+                  )}
+                </div>
+              )}
+            </fieldset>
+          )}
+
           <button className="primary-button" type="button" onClick={upload} disabled={!selectedFiles.length || isUploading}>
             {isUploading ? 'Procesando y guardando…' : 'Subir al archivo seguro'}
           </button>
@@ -215,11 +397,111 @@ export default function App() {
       {notice && <p className={`notice ${notice.type}`} role="status">{notice.text}</p>}
 
       <section className="archive-section" aria-label="Archivos almacenados">
-        <div className="section-heading"><div><p className="eyebrow">MinIO S3 privado</p><h2>Archivos almacenados</h2></div><div className="archive-tools"><input className="file-search" type="search" value={searchTerm} onChange={(event) => setSearchTerm(event.target.value)} placeholder="Buscar por nombre o formato" aria-label="Buscar archivos almacenados" /><button className="icon-button" type="button" onClick={refreshFiles} disabled={isLoading} aria-label="Actualizar lista">↻</button></div></div>
+        <div className="section-heading">
+          <div><p className="eyebrow">MinIO S3 privado</p><h2>Archivos almacenados</h2></div>
+          <div className="archive-tools">
+            <select
+              className="file-filter"
+              value={extensionFilter}
+              onChange={(event) => setExtensionFilter(event.target.value)}
+              aria-label="Filtrar por categoría o extensión"
+            >
+              <option value="all">Todas las categorías</option>
+              {availableExtensions.map((extension) => (
+                <option key={extension} value={extension}>.{extension}</option>
+              ))}
+            </select>
+            <input className="file-search" type="search" value={searchTerm} onChange={(event) => setSearchTerm(event.target.value)} placeholder="Buscar por nombre o formato" aria-label="Buscar archivos almacenados" />
+            <button className="icon-button" type="button" onClick={refreshFiles} disabled={isLoading} aria-label="Actualizar lista">↻</button>
+          </div>
+        </div>
+
         {isLoading ? <p className="empty-state">Actualizando el archivo…</p> : storedFiles.length ? (
-          filteredFiles.length ? <div className="file-table-wrap"><table><thead><tr><th>Archivo</th><th>Protección</th><th>Tamaño</th><th>Fecha</th><th aria-label="Acciones" /></tr></thead><tbody><tr><th>Acciones</th></tr>
-            {filteredFiles.map((file) => <tr key={file.id}><td><strong>{file.fileName}</strong><small>{file.contentType}</small></td><td>{file.watermarked ? <span className="badge protected">PDF con marca</span> : isPdf(file) ? <span className="badge">PDF original</span> : <span className="badge">Almacenado</span>}</td><td>{readableSize(file.size)}</td><td>{new Intl.DateTimeFormat('es-BO', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(file.uploadedAt))}</td><td className="actions"><a href={file.viewUrl || `${file.downloadUrl}?disposition=inline`} target="_blank" rel="noreferrer">Ver archivo</a><a href={file.downloadUrl}>Descargar</a><button type="button" onClick={() => remove(file)}>Eliminar</button></td></tr>)}
-          </tbody></table></div> : <p className="empty-state">No se encontraron archivos que coincidan con la búsqueda.</p>
+          filteredFiles.length ? (
+            <>
+              <div className="file-table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Archivo</th>
+                      <th>Protección</th>
+                      <th>Conservación</th>
+                      <th>Tamaño</th>
+                      <th>Fecha</th>
+                      <th aria-label="Acciones" />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {pageFiles.map((file) => (
+                      <tr key={file.id}>
+                        <td><strong>{file.fileName}</strong><small>{file.contentType}</small></td>
+                        <td>
+                          {file.watermarked ? (
+                            <span className="badge protected">PDF con marca</span>
+                          ) : isPdf(file) ? (
+                            <span className="badge">PDF original</span>
+                          ) : (
+                            <span className="badge">Almacenado</span>
+                          )}
+                        </td>
+                        <td>
+                          {file.retention === 'temporary' ? (
+                            <span className="badge temporal"><ClockIcon /> Vence {file.expiresAt ? formatDate(file.expiresAt) : '—'}</span>
+                          ) : (
+                            <span className="badge permanent"><ShieldIcon /> Permanente</span>
+                          )}
+                        </td>
+                        <td>{readableSize(file.size)}{file.compressed && <small className="compressed-hint">Comprimido sin pérdida</small>}</td>
+                        <td>{formatDate(file.uploadedAt)}</td>
+                        <td className="actions">
+                          <a
+                            className="action-btn action-view"
+                            href={file.viewUrl || `${file.downloadUrl}?disposition=inline`}
+                            target="_blank"
+                            rel="noreferrer"
+                            title="Ver archivo"
+                          >
+                            <EyeIcon /><span>Ver</span>
+                          </a>
+                          <a className="action-btn action-download" href={file.downloadUrl} title="Descargar">
+                            <DownloadIcon /><span>Decargar</span>
+                          </a>
+                          <button type="button" className="action-btn action-delete" onClick={() => remove(file)} title="Eliminar">
+                            <TrashIcon /><span>Eliminar</span>
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="pagination" aria-label="Paginación de archivos almacenados">
+                <p className="pagination-count">
+                  Mostrando {totalItems === 0 ? 0 : startIndex + 1} - {endIndex} de {totalItems} archivos
+                </p>
+                <div className="pagination-controls">
+                  <button
+                    type="button"
+                    className="pagination-button"
+                    onClick={() => setCurrentPage((page) => Math.max(1, page - 1))}
+                    disabled={safePage <= 1}
+                  >
+                    ← Anterior
+                  </button>
+                  <span className="pagination-page">Página {safePage} de {totalPages}</span>
+                  <button
+                    type="button"
+                    className="pagination-button"
+                    onClick={() => setCurrentPage((page) => Math.min(totalPages, page + 1))}
+                    disabled={safePage >= totalPages}
+                  >
+                    Siguiente →
+                  </button>
+                </div>
+              </div>
+            </>
+          ) : <p className="empty-state">No se encontraron archivos que coincidan con la búsqueda o el filtro.</p>
         ) : <p className="empty-state">No hay archivos en el repositorio todavía.</p>}
       </section>
       <footer className="footer-system">
