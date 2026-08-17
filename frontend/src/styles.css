@@ -69,7 +69,7 @@ h1 { margin-bottom: 0; font-size: 1.08rem; letter-spacing: -.02em; color: var(--
 .hero {
   display: flex;
   justify-content: space-between;
-  align-items: end;
+  align-items: center;
   gap: 28px;
   padding: 43px 48px;
   min-height: 250px;
@@ -87,14 +87,14 @@ h1 { margin-bottom: 0; font-size: 1.08rem; letter-spacing: -.02em; color: var(--
   flex: 0 0 auto;
   display: grid;
   place-items: center;
-  width: 60px;
-  height: 60px;
+  width: 120px;
+  height: 120px;
   border-radius: 50%;
   overflow: hidden;
-  padding: 3px;
-  background: var(--policia-blanco);
+  padding: 2px;
+  /*background: var(--policia-blanco);
   border: 2px solid var(--policia-oro);
-  box-shadow: 0 6px 14px rgba(10, 26, 15, 0.25);
+  box-shadow: 0 6px 14px rgba(10, 26, 15, 0.25);*/
 }
 .hero-logo img { width: 100%; height: 100%; border-radius: 50%; object-fit: cover; object-position: center; }
 

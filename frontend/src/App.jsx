@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import PB from './img/PB.jpeg';
-import escudo from './img/CARCANCHO-FINAL.png'
+import escudo from './img/CARCANCHO-FINAL.png';
+import mi_caja from './img/mi_caja.jpeg';
 const MAX_FILE_SIZE = 50 * 1024 * 1024;
 const MAX_FILES = 10;
 const DEFAULT_WATERMARK_TEXT = 'POLICIA BOLIVIANA';
@@ -142,9 +143,6 @@ export default function App() {
       return matchesTerm && matchesExtension;
     });
   }, [storedFiles, searchTerm, extensionFilter]);
-
-  // Requerimiento: si el usuario busca o filtra, la paginación se recalcula
-  // automáticamente y vuelve siempre a la página 1.
   useEffect(() => {
     setCurrentPage(1);
   }, [searchTerm, extensionFilter]);
@@ -262,7 +260,7 @@ export default function App() {
     <main className="shell">
       <header className="topbar">
         <div className="brand-mark" aria-label="Logo Policía Boliviana">
-          <img src={PB} alt="Escudo Policía Boliviana" />
+          <img src={mi_caja} alt="Escudo Policía Boliviana" />
         </div>
         <div>
           <p className="eyebrow">Policía Boliviana</p>
@@ -282,10 +280,10 @@ export default function App() {
             <p className="lead">Los documentos PDF pueden guardarse como originales o con una marca de agua personalizada. Los demás formatos se almacenan sin modificaciones.</p>
           </div>
         </div>
-        <div className="protection-card">
+        {/*<div className="protection-card">
           <span className="shield">⌾</span>
           <div><strong>Protección PDF activa</strong><small>Stirling PDF + marca de agua</small></div>
-        </div>
+        </div> */}
       </section>
 
       <section className="workspace" aria-label="Carga de archivos">
@@ -461,13 +459,13 @@ export default function App() {
                             rel="noreferrer"
                             title="Ver archivo"
                           >
-                            <EyeIcon /><span>Ver</span>
+                            <EyeIcon />{/*<span>Ver</span>*/}
                           </a>
                           <a className="action-btn action-download" href={file.downloadUrl} title="Descargar">
-                            <DownloadIcon /><span>Decargar</span>
+                            <DownloadIcon />{/*<span>Decargar</span>*/}
                           </a>
                           <button type="button" className="action-btn action-delete" onClick={() => remove(file)} title="Eliminar">
-                            <TrashIcon /><span>Eliminar</span>
+                            <TrashIcon />{/*<span>Eliminar</span>*/}
                           </button>
                         </td>
                       </tr>
