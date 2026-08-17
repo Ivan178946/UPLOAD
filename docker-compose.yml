@@ -36,7 +36,7 @@ services:
       - minio
       - stirling-pdf
     ports:
-      - "4000:4000"
+      - "5000:4000"
     restart: unless-stopped
 
   frontend:
