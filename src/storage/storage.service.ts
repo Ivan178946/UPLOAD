@@ -15,8 +15,9 @@ import {
   NotFoundException,
   OnModuleInit,
 } from '@nestjs/common';
-import { randomUUID } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 import { basename, extname } from 'path';
+import { gunzipSync } from 'zlib';
 
 export interface ObjectSummary {
   key: string;
@@ -29,20 +30,20 @@ export interface ObjectMetadata {
   originalName?: string;
   watermarked?: string;
   originalKey?: string;
-  /** 'true' si el objeto se guarda comprimido (gzip) de forma transparente y sin pérdida de calidad. */
   compressed?: string;
-  /** Tamaño real del archivo original (sin comprimir), en bytes, como texto. */
   originalSize?: string;
-  /** 'permanent' | 'temporary' — política de conservación elegida por el usuario. */
   retention?: string;
-  /** Fecha ISO en la que el archivo temporal debe eliminarse automáticamente. */
   expiresAt?: string;
+  sha256?: string;
+  fingerprint?: string;
+  watermarkText?: string;
 }
 
 @Injectable()
 export class StorageService implements OnModuleInit {
   private readonly logger = new Logger(StorageService.name);
   private readonly bucket = process.env.S3_BUCKET || 'archivos-policiales';
+
   private readonly client = new S3Client({
     endpoint: process.env.S3_ENDPOINT || 'http://minio:9000',
     region: process.env.S3_REGION || 'us-east-1',
@@ -59,9 +60,7 @@ export class StorageService implements OnModuleInit {
         await this.ensureBucket();
         return;
       } catch (error) {
-        if (attempt === 20) {
-          throw error;
-        }
+        if (attempt === 20) throw error;
         this.logger.warn(
           `MinIO aún no está disponible (intento ${attempt}/20). Reintentando…`,
         );
@@ -109,7 +108,7 @@ export class StorageService implements OnModuleInit {
   async list(): Promise<ObjectSummary[]> {
     const objects: ObjectSummary[] = [];
     let continuationToken: string | undefined;
-    const MAX_OBJECTS = 5000; // límite de seguridad para evitar listados descontrolados
+    const MAX_OBJECTS = 5000;
 
     do {
       const result = await this.client.send(
@@ -147,6 +146,7 @@ export class StorageService implements OnModuleInit {
       const result = await this.client.send(
         new HeadObjectCommand({ Bucket: this.bucket, Key: key }),
       );
+
       return {
         contentType: result.ContentType,
         originalName: result.Metadata?.originalname,
@@ -156,6 +156,9 @@ export class StorageService implements OnModuleInit {
         originalSize: result.Metadata?.originalsize,
         retention: result.Metadata?.retention,
         expiresAt: result.Metadata?.expiresat,
+        sha256: result.Metadata?.sha256,
+        fingerprint: result.Metadata?.fingerprint,
+        watermarkText: result.Metadata?.watermarktext,
       };
     } catch (error) {
       if (this.isNotFound(error)) {
@@ -163,6 +166,144 @@ export class StorageService implements OnModuleInit {
       }
       throw error;
     }
+  }
+
+  async findBySourceSha256(
+    sha256: string,
+    watermarked: boolean,
+  ): Promise<{ key: string; metadata: ObjectMetadata } | null> {
+    if (!sha256) return null;
+
+    const objects = await this.list();
+
+    for (const object of objects) {
+      try {
+        const metadata = await this.metadata(object.key);
+
+        if (metadata.sha256 !== sha256) continue;
+
+        if (metadata.watermarked !== String(watermarked)) continue;
+
+        return { key: object.key, metadata };
+      } catch {
+        continue;
+      }
+    }
+
+    return null;
+  }
+
+  async findLegacyVersion(
+    originalName: string,
+    originalSize: number,
+    watermarked: boolean,
+  ): Promise<{ key: string; metadata: ObjectMetadata } | null> {
+    const objects = await this.list();
+    const targetName = originalName.trim().toLowerCase();
+
+    for (const object of objects) {
+      try {
+        const metadata = await this.metadata(object.key);
+
+        if (metadata.watermarked !== String(watermarked)) continue;
+
+        const storedName = metadata.originalName
+          ? metadata.originalName.trim().toLowerCase()
+          : '';
+
+        if (storedName !== targetName) continue;
+
+        if (Number(metadata.originalSize) !== originalSize) continue;
+
+        // Archivos antiguos con marca pueden no tener watermarkText.
+        // Si sí lo tienen, debe coincidir.
+        return { key: object.key, metadata };
+      } catch {
+        continue;
+      }
+    }
+
+    return null;
+  }
+
+  async findByFingerprint(
+    fingerprint: string,
+  ): Promise<{ key: string; metadata: ObjectMetadata } | null> {
+    if (!fingerprint) return null;
+
+    const objects = await this.list();
+
+    for (const object of objects) {
+      try {
+        const metadata = await this.metadata(object.key);
+        if (metadata.fingerprint === fingerprint) {
+          return { key: object.key, metadata };
+        }
+      } catch {
+        this.logger.warn(
+          `No se pudieron leer los metadatos de ${object.key}. Se omite.`,
+        );
+      }
+    }
+
+    return null;
+  }
+
+  // Compatibilidad con archivos nuevos/anteriores que ya tengan SHA-256.
+  async findBySha256(
+    sha256: string,
+    originalSize?: number,
+  ): Promise<{ key: string; metadata: ObjectMetadata } | null> {
+    if (!sha256) return null;
+
+    const objects = await this.list();
+
+    for (const object of objects) {
+      let metadata: ObjectMetadata;
+
+      try {
+        metadata = await this.metadata(object.key);
+      } catch {
+        continue;
+      }
+
+      if (metadata.sha256 === sha256) {
+        return { key: object.key, metadata };
+      }
+
+      if (
+        !metadata.sha256 &&
+        originalSize !== undefined &&
+        Number(metadata.originalSize) === originalSize
+      ) {
+        try {
+          const stored = await this.get(object.key);
+          if (!stored.Body) continue;
+
+          let buffer = Buffer.from(
+            await stored.Body.transformToByteArray(),
+          );
+
+          if (metadata.compressed === 'true') {
+            buffer = gunzipSync(buffer);
+          }
+
+          const legacyHash = createHash('sha256')
+            .update(buffer)
+            .digest('hex');
+
+          if (legacyHash === sha256) {
+            return { key: object.key, metadata };
+          }
+        } catch {
+          this.logger.warn(
+            `No se pudo calcular el hash del archivo antiguo ${object.key}.`,
+          );
+        }
+      }
+    }
+
+    return null;
   }
 
   createKey(originalName: string): string {
@@ -209,17 +350,12 @@ export class StorageService implements OnModuleInit {
     try {
       await this.client.send(new HeadBucketCommand({ Bucket: this.bucket }));
     } catch (error) {
-      if (!this.isNotFound(error)) {
-        throw error;
-      }
+      if (!this.isNotFound(error)) throw error;
       try {
         await this.client.send(new CreateBucketCommand({ Bucket: this.bucket }));
         this.logger.log(`Bucket «${this.bucket}» creado.`);
       } catch (createError) {
-        // Otro contenedor puede haberlo creado durante este intervalo.
-        if (!this.isAlreadyExists(createError)) {
-          throw createError;
-        }
+        if (!this.isAlreadyExists(createError)) throw createError;
       }
     }
   }

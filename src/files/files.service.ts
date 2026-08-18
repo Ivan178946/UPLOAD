@@ -5,6 +5,7 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
+import { createHash } from 'crypto';
 import { extname } from 'path';
 import { Readable } from 'stream';
 import { createGunzip } from 'zlib';
@@ -46,6 +47,7 @@ export interface StoredFile {
   compressed: boolean;
   retention: RetentionMode;
   expiresAt?: string;
+  duplicate?: boolean;
 }
 
 @Injectable()
@@ -168,18 +170,115 @@ export class FilesService {
   ): Promise<StoredFile> {
     const pdf = this.isPdf(file);
     const watermarked = pdf && options.pdfMode === 'watermarked';
+
+    // Hash estable del archivo que seleccionó el usuario.
+    // NO usamos como identificador principal el PDF generado por Stirling,
+    // porque ese PDF puede cambiar metadatos internos entre ejecuciones.
+    const sourceSha256 = createHash('sha256')
+      .update(file.buffer)
+      .digest('hex');
+
     const contents = watermarked
       ? await this.addWatermark(file, options.watermarkText)
       : file.buffer;
+
     const contentType = pdf
       ? 'application/pdf'
       : file.mimetype || 'application/octet-stream';
-    const key = this.storage.createKey(file.originalname);
 
-    // Compresión sin pérdida (lossless) del archivo, sin importar su formato,
-    // antes de guardarlo en MinIO. El archivo se descomprime de forma
-    // transparente al momento de la descarga, por lo que el usuario nunca
-    // percibe ningún cambio ni pérdida de calidad.
+    // Una misma fuente puede tener dos versiones:
+    // 1) original
+    // 2) con marca de agua
+    //
+    // IMPORTANTE: el texto de la marca NO forma parte de la identidad.
+    // "POLICIA BOLIVIANA", "NO COPIAR", "CONFIDENCIAL", etc.
+    // pertenecen a la misma categoría: versión con marca de agua.
+    const fingerprint = createHash('sha256')
+      .update(
+        [
+          sourceSha256,
+          watermarked ? 'watermarked' : 'original',
+        ].join('|'),
+      )
+      .digest('hex');
+
+    // 1) Buscar por hash del archivo original + modo + marca.
+    // Esto detecta también versiones creadas con la implementación anterior
+    // que ya guardaban sha256 como hash del archivo fuente.
+    const bySourceHash = await this.storage.findBySourceSha256(
+      sourceSha256,
+      watermarked,
+    );
+
+    const existing = bySourceHash || await this.storage.findByFingerprint(fingerprint);
+
+    if (existing) {
+      this.logger.log(
+        `Duplicado detectado por fingerprint: ${file.originalname} → ${existing.key}`,
+      );
+
+      const existingSize = Number(existing.metadata.originalSize);
+
+      return this.toStoredFile(
+        existing.key,
+        this.originalName(
+          existing.key,
+          existing.metadata.originalName,
+        ),
+        existing.metadata.contentType || contentType,
+        Number.isFinite(existingSize)
+          ? existingSize
+          : contents.length,
+        new Date().toISOString(),
+        existing.metadata.watermarked === 'true',
+        existing.metadata.compressed === 'true',
+        existing.metadata.retention === 'temporary'
+          ? 'temporary'
+          : 'permanent',
+        existing.metadata.expiresAt || undefined,
+        true,
+      );
+    }
+
+    // 2) Compatibilidad con archivos antiguos que no tienen fingerprint
+    // ni el hash del archivo fuente. Se compara nombre + tamaño + modo y,
+    // cuando existe, texto de marca.
+    const legacyVersion = await this.storage.findLegacyVersion(
+      file.originalname,
+      file.buffer.length,
+      watermarked,
+    );
+
+    if (legacyVersion) {
+      this.logger.log(
+        `Duplicado antiguo detectado: ${file.originalname} → ${legacyVersion.key}`,
+      );
+
+      const existingSize = Number(legacyVersion.metadata.originalSize);
+
+      return this.toStoredFile(
+        legacyVersion.key,
+        this.originalName(
+          legacyVersion.key,
+          legacyVersion.metadata.originalName,
+        ),
+        legacyVersion.metadata.contentType || contentType,
+        Number.isFinite(existingSize)
+          ? existingSize
+          : file.buffer.length,
+        new Date().toISOString(),
+        legacyVersion.metadata.watermarked === 'true',
+        legacyVersion.metadata.compressed === 'true',
+        legacyVersion.metadata.retention === 'temporary'
+          ? 'temporary'
+          : 'permanent',
+        legacyVersion.metadata.expiresAt || undefined,
+        true,
+      );
+    }
+
+    // No existe la versión solicitada: guardar una sola copia.
+    const key = this.storage.createKey(file.originalname);
     const compression = compressBuffer(contents);
 
     await this.storage.put(key, compression.buffer, contentType, {
@@ -189,6 +288,9 @@ export class FilesService {
       originalSize: String(compression.originalSize),
       retention: options.retentionMode,
       expiresAt: options.expiresAt || '',
+      sha256: sourceSha256,
+      fingerprint,
+      watermarkText: watermarked ? options.watermarkText.trim() : '',
     });
 
     return this.toStoredFile(
@@ -201,6 +303,7 @@ export class FilesService {
       compression.compressed,
       options.retentionMode,
       options.expiresAt,
+      false,
     );
   }
 
@@ -214,16 +317,16 @@ export class FilesService {
       new Blob([file.buffer], { type: 'application/pdf' }),
       file.originalname,
     );
-    form.append('customColor', '#000000'); 
-    form.append('watermarkColor', '#000000');
+    form.append('customColor', '#4A5123');
+    form.append('watermarkColor', '#4A5123');
     form.append('watermarkType', 'text');
     form.append('watermarkText', watermarkText);
     form.append('alphabet', 'roman');
-    form.append('fontSize', '44');
-    form.append('rotation', '0'); 
-    form.append('opacity', '0.22');
-    form.append('widthSpacer', '80');
-    form.append('heightSpacer', '80');
+    form.append('fontSize', '30');
+    form.append('rotation', '0');
+    form.append('opacity', '0.20');
+    form.append('widthSpacer', '250');
+    form.append('heightSpacer', '200');
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 120_000);
@@ -327,6 +430,7 @@ export class FilesService {
     compressed: boolean,
     retention: RetentionMode,
     expiresAt?: string,
+    duplicate = false,
   ): StoredFile {
     const id = this.storage.encodeId(key);
     const downloadUrl = `/api/files/${id}`;
@@ -342,6 +446,7 @@ export class FilesService {
       compressed,
       retention,
       expiresAt,
+      duplicate,
     };
   }
 

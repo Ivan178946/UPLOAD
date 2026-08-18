@@ -88,15 +88,17 @@ h1 { margin-bottom: 0; font-size: 1.08rem; letter-spacing: -.02em; color: var(--
   display: grid;
   place-items: center;
   width: 120px;
-  height: 120px;
-  border-radius: 50%;
-  overflow: hidden;
-  padding: 2px;
-  /*background: var(--policia-blanco);
-  border: 2px solid var(--policia-oro);
-  box-shadow: 0 6px 14px rgba(10, 26, 15, 0.25);*/
+  height: 145px;
+  overflow: visible;
+  padding: 0;
 }
-.hero-logo img { width: 100%; height: 100%; border-radius: 50%; object-fit: cover; object-position: center; }
+.hero-logo img {
+  display: block;
+  width: 120px;
+  height: 145px;
+  object-fit: contain;
+  object-position: center;
+}
 
 .hero h2 { max-width: 670px; margin-bottom: 13px; font-size: clamp(1.72rem, 4vw, 2.65rem); line-height: 1.08; letter-spacing: -.045em; }
 
@@ -234,11 +236,63 @@ h1 { margin-bottom: 0; font-size: 1.08rem; letter-spacing: -.02em; color: var(--
   font-size: .73rem;
   font-weight: 800;
 }
-.checkbox-option { display: flex; align-items: flex-start; gap: 8px; cursor: pointer; }
-.checkbox-option input { margin: 3px 0 0; accent-color: var(--policia-verde-olivo); }
-.checkbox-option strong, .checkbox-option small { display: block; }
-.checkbox-option strong { color: var(--policia-texto-oscuro); font-size: .73rem; }
-.checkbox-option small { margin-top: 3px; color: var(--policia-texto-suave); font-size: .66rem; line-height: 1.35; }
+/* -------- Interruptor PDF original ON/OFF -------- */
+.toggle-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.toggle-text { flex: 1; min-width: 0; }
+.toggle-text strong, .toggle-text small { display: block; }
+.toggle-text strong { color: var(--policia-texto-oscuro); font-size: .73rem; }
+.toggle-text small { margin-top: 3px; color: var(--policia-texto-suave); font-size: .66rem; line-height: 1.3; }
+
+.toggle-switch {
+  position: relative;
+  flex: 0 0 auto;
+  width: 42px;
+  height: 21px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: #cfd5d0;
+  cursor: pointer;
+  transition: background .18s ease;
+}
+.toggle-switch.is-on { background: var(--policia-verde-olivo); }
+.toggle-switch.is-off { background: #cfd5d0; }
+
+.toggle-label {
+  position: absolute;
+  top: 0;
+  left: 3px;
+  width: 20px;
+  height: 21px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-size: 6px;
+  font-weight: 800;
+  line-height: 1;
+  z-index: 1;
+}
+.toggle-switch.is-off .toggle-label { left: 19px; color: #5c665f; }
+
+.toggle-knob {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, .25);
+  transition: transform .18s ease;
+}
+.toggle-switch.is-on .toggle-knob { transform: translateX(21px); }
+.toggle-switch:disabled { cursor: not-allowed; opacity: .58; }
 .watermark-input { display: block; margin-top: 11px; color: var(--policia-texto-suave); font-size: .69rem; font-weight: 750; }
 .watermark-input span { display: block; margin-bottom: 5px; }
 .watermark-input input {
@@ -451,7 +505,8 @@ td small { margin-top: 4px; color: var(--policia-texto-suave); font-size: .68rem
   .system-status { display: none; }
   .hero { align-items: flex-start; flex-direction: column; padding: 29px 25px; }
   .hero-heading { gap: 14px; }
-  .hero-logo { width: 46px; height: 46px; }
+  .hero-logo { width: 58px; height: 70px; }
+.hero-logo img { width: 58px; height: 70px; }
   .protection-card { flex-basis: auto; width: 100%; }
   .workspace { grid-template-columns: 1fr; }
   .selection-panel { min-height: 215px; }
