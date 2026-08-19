@@ -1,24 +1,10 @@
 import {
-  Body,
-  Controller,
-  Delete,
-  Get,
-  HttpCode,
-  HttpStatus,
-  Param,
-  Post,
-  Query,
-  Res,
-  UploadedFiles,
-  UseInterceptors,
+  BadRequestException, Body, Controller, Delete, Get, HttpCode,
+  HttpStatus, Param, Post, Query, Res, UploadedFiles, UseInterceptors,
 } from '@nestjs/common';
 import { FilesService } from './files.service';
 import {
-  ApiBody,
-  ApiConsumes,
-  ApiOperation,
-  ApiResponse,
-  ApiTags,
+  ApiBody, ApiConsumes, ApiOperation, ApiResponse, ApiTags,
 } from '@nestjs/swagger';
 import { FilesInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
@@ -33,9 +19,9 @@ export class FilesController {
   constructor(private readonly filesService: FilesService) {}
 
   @ApiOperation({
-    summary: 'Sube archivos de cualquier formato a MinIO',
+    summary: 'Sube hasta 10 archivos a MinIO',
     description:
-      'Los PDF pueden guardarse originales o procesarse con una marca de agua personalizada. Los demás formatos se almacenan sin modificaciones.',
+      'Se pueden subir hasta 10 archivos por operación. Los PDF pueden guardarse originales o con una marca de agua personalizada. Los duplicados no se almacenan nuevamente.',
   })
   @ApiConsumes('multipart/form-data')
   @ApiBody({
@@ -45,41 +31,45 @@ export class FilesController {
       properties: {
         files: {
           type: 'array',
+          minItems: 1,
           maxItems: MAX_FILES_PER_REQUEST,
           items: { type: 'string', format: 'binary' },
+          description: 'Máximo 10 archivos por operación.',
         },
         pdfMode: {
           type: 'string',
           enum: ['original', 'watermarked'],
           default: 'watermarked',
-          description: 'Modo de almacenamiento para los archivos PDF.',
+          description: 'Modo de almacenamiento para los PDF.',
         },
         watermarkText: {
           type: 'string',
           maxLength: 120,
-          description: 'Texto de la marca de agua cuando pdfMode es watermarked.',
+          description: 'Texto personalizado de la marca de agua.',
         },
         retentionMode: {
           type: 'string',
           enum: ['permanent', 'temporary'],
           default: 'permanent',
-          description:
-            'Política de conservación: almacenamiento permanente o por un lapso de tiempo definido por el usuario.',
+          description: 'Conservación permanente o temporal.',
         },
         retentionDays: {
           type: 'number',
-          description:
-            'Cantidad de días que se conservará el archivo cuando retentionMode es temporary.',
+          description: 'Días de conservación cuando sea temporal.',
         },
       },
     },
   })
-  @ApiResponse({ status: 201, description: 'Archivos almacenados correctamente.' })
+  @ApiResponse({ status: 201, description: 'Archivos procesados correctamente.' })
+  @ApiResponse({ status: 400, description: 'Cantidad de archivos no válida.' })
   @Post()
   @UseInterceptors(
     FilesInterceptor('files', MAX_FILES_PER_REQUEST, {
       storage: memoryStorage(),
-      limits: { fileSize: MAX_FILE_SIZE, files: MAX_FILES_PER_REQUEST },
+      limits: {
+        fileSize: MAX_FILE_SIZE,
+        files: MAX_FILES_PER_REQUEST,
+      },
       fileFilter: (_request, file, callback) => {
         if (!file.originalname?.trim()) {
           callback(new Error('El archivo debe tener un nombre.'), false);
@@ -96,6 +86,14 @@ export class FilesController {
     @Body('retentionMode') retentionMode?: string,
     @Body('retentionDays') retentionDays?: string,
   ) {
+    if (!files?.length)
+      throw new BadRequestException('Debe seleccionar al menos un archivo.');
+
+    if (files.length > MAX_FILES_PER_REQUEST)
+      throw new BadRequestException(
+        `Solo se permiten hasta ${MAX_FILES_PER_REQUEST} archivos por operación.`,
+      );
+
     return this.filesService.upload(files, {
       pdfMode,
       watermarkText,
@@ -104,15 +102,22 @@ export class FilesController {
     });
   }
 
-  @ApiOperation({ summary: 'Lista los últimos archivos almacenados' })
+  @ApiOperation({ summary: 'Descarga un archivo duplicado con la marca personalizada.' })
+  @Get('duplicate/:token')
+  downloadDuplicate(
+    @Param('token') token: string,
+    @Res() response: Response,
+  ) {
+    return this.filesService.downloadTemporary(token, response);
+  }
+
+  @ApiOperation({ summary: 'Lista los últimos archivos almacenados.' })
   @Get()
   list() {
     return this.filesService.list();
   }
 
-  @ApiOperation({
-    summary: 'Visualiza o descarga un archivo desde MinIO a través del API',
-  })
+  @ApiOperation({ summary: 'Visualiza o descarga un archivo desde MinIO.' })
   @Get(':id')
   download(
     @Param('id') id: string,
@@ -122,7 +127,7 @@ export class FilesController {
     return this.filesService.download(id, response, disposition);
   }
 
-  @ApiOperation({ summary: 'Elimina un archivo de MinIO' })
+  @ApiOperation({ summary: 'Elimina un archivo de MinIO.' })
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
   remove(@Param('id') id: string) {

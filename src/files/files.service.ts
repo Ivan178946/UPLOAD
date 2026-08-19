@@ -1,11 +1,8 @@
 import {
-  BadGatewayException,
-  BadRequestException,
-  Injectable,
-  Logger,
-  NotFoundException,
+  BadGatewayException, BadRequestException, Injectable,
+  Logger, NotFoundException,
 } from '@nestjs/common';
-import { createHash } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 import { extname } from 'path';
 import { Readable } from 'stream';
 import { createGunzip } from 'zlib';
@@ -16,7 +13,9 @@ import { compressBuffer } from '../common/helper/compression.helper';
 const WATERMARK_TEXT = 'POLICIA BOLIVIANA';
 const MAX_WATERMARK_TEXT_LENGTH = 120;
 const MIN_RETENTION_DAYS = 1;
-const MAX_RETENTION_DAYS = 3650; // 10 años, límite de seguridad
+const MAX_RETENTION_DAYS = 3650;
+const MAX_FILES = 10;
+const DUPLICATE_TTL = 5 * 60 * 1000;
 
 type PdfMode = 'original' | 'watermarked';
 type RetentionMode = 'permanent' | 'temporary';
@@ -33,6 +32,13 @@ interface NormalisedUploadOptions {
   watermarkText: string;
   retentionMode: RetentionMode;
   expiresAt?: string;
+}
+
+interface TemporaryFile {
+  buffer: Buffer;
+  fileName: string;
+  contentType: string;
+  expires: number;
 }
 
 export interface StoredFile {
@@ -53,92 +59,67 @@ export interface StoredFile {
 @Injectable()
 export class FilesService {
   private readonly logger = new Logger(FilesService.name);
+  private readonly temporaryFiles = new Map<string, TemporaryFile>();
 
   constructor(private readonly storage: StorageService) {}
 
-  async upload(
-    files: Express.Multer.File[],
-    input: UploadOptions = {},
-  ): Promise<StoredFile[]> {
-    if (!files?.length) {
-      throw new BadRequestException('Debe seleccionar al menos un archivo.');
-    }
+  async upload(files: Express.Multer.File[], input: UploadOptions = {}): Promise<StoredFile[]> {
+    if (!files?.length) throw new BadRequestException('Debe seleccionar al menos un archivo.');
+    if (files.length > MAX_FILES) throw new BadRequestException(`Solo se permite subir hasta ${MAX_FILES} archivos por operación.`);
 
-    const options: NormalisedUploadOptions = this.normaliseUploadOptions(input);
+    const options = this.normaliseUploadOptions(input);
 
     try {
-      const results = await Promise.all(
-        files.map((file) => this.store(file, options)),
-      );
-      this.logger.log(`Se almacenaron ${results.length} archivos en MinIO.`);
+      const results = await Promise.all(files.map(file => this.store(file, options)));
+      this.logger.log(`Procesados ${results.length} archivos.`);
       return results;
     } catch (error) {
-      this.logger.error(
-        `Error al subir archivos: ${error instanceof Error ? error.message : String(error)}`,
-      );
+      this.logger.error(`Error al subir archivos: ${error instanceof Error ? error.message : String(error)}`);
       throw error;
     }
   }
 
   async list(): Promise<StoredFile[]> {
     const objects = await this.storage.list();
-    return Promise.all(
-      objects.map(async (object) => {
-        const metadata = await this.storage.metadata(object.key);
-        // Se muestra siempre el tamaño real del archivo (sin comprimir) para
-        // que el usuario vea el tamaño original, aunque en MinIO ocupe menos.
-        const displaySize = metadata.originalSize
-          ? Number(metadata.originalSize)
-          : object.size;
-        return this.toStoredFile(
-          object.key,
-          this.originalName(object.key, metadata.originalName),
-          metadata.contentType || 'application/octet-stream',
-          Number.isFinite(displaySize) ? displaySize : object.size,
-          object.lastModified?.toISOString() || new Date().toISOString(),
-          metadata.watermarked === 'true',
-          metadata.compressed === 'true',
-          metadata.retention === 'temporary' ? 'temporary' : 'permanent',
-          metadata.expiresAt || undefined,
-        );
-      }),
-    );
+
+    return Promise.all(objects.map(async object => {
+      const metadata = await this.storage.metadata(object.key);
+      const size = metadata.originalSize ? Number(metadata.originalSize) : object.size;
+
+      return this.toStoredFile(
+        object.key,
+        this.originalName(object.key, metadata.originalName),
+        metadata.contentType || 'application/octet-stream',
+        Number.isFinite(size) ? size : object.size,
+        object.lastModified?.toISOString() || new Date().toISOString(),
+        metadata.watermarked === 'true',
+        metadata.compressed === 'true',
+        metadata.retention === 'temporary' ? 'temporary' : 'permanent',
+        metadata.expiresAt || undefined,
+      );
+    }));
   }
 
-  async download(
-    id: string,
-    response: Response,
-    disposition?: string,
-  ): Promise<void> {
+  async download(id: string, response: Response, disposition?: string): Promise<void> {
     const key = this.storage.decodeId(id);
     const metadata = await this.storage.metadata(key);
-    const fileName = this.originalName(key, metadata.originalName);
     const object = await this.storage.get(key);
-    const contentDisposition = disposition === 'inline' ? 'inline' : 'attachment';
-    const isCompressed = metadata.compressed === 'true';
+    const fileName = this.originalName(key, metadata.originalName);
+    const compressed = metadata.compressed === 'true';
 
     try {
       response.setHeader(
         'Content-Disposition',
-        `${contentDisposition}; filename*=UTF-8''${encodeURIComponent(fileName)}`,
+        `${disposition === 'inline' ? 'inline' : 'attachment'}; filename*=UTF-8''${encodeURIComponent(fileName)}`,
       );
-      response.setHeader(
-        'Content-Type', metadata.contentType || 'application/octet-stream');
-      // El Content-Length solo se puede fijar de antemano cuando el archivo
-      // no requiere descompresión, ya que el tamaño descomprimido difiere
-      // del tamaño almacenado.
-      if (!isCompressed && object.ContentLength) {
-        response.setHeader('Content-Length', object.ContentLength);
-      } else if (isCompressed && metadata.originalSize) {
-        response.setHeader('Content-Length', metadata.originalSize);
-      }
+      response.setHeader('Content-Type', metadata.contentType || 'application/octet-stream');
+
+      if (!compressed && object.ContentLength) response.setHeader('Content-Length', object.ContentLength);
+      else if (compressed && metadata.originalSize) response.setHeader('Content-Length', metadata.originalSize);
 
       await new Promise<void>((resolve, reject) => {
         const stream = object.Body as Readable;
-        // Si el archivo se guardó comprimido con gzip, se descomprime al
-        // vuelo de forma transparente: el usuario siempre recibe el archivo
-        // original, bit a bit, sin ninguna pérdida de calidad.
-        const output = isCompressed ? stream.pipe(createGunzip()) : stream;
+        const output = compressed ? stream.pipe(createGunzip()) : stream;
         stream.on('error', reject);
         output.on('error', reject);
         response.on('error', reject);
@@ -146,138 +127,122 @@ export class FilesService {
         output.pipe(response);
       });
     } catch (error) {
-      this.logger.error(
-        `Error al descargar ${key}: ${error instanceof Error ? error.message : String(error)}`,
-      );
-      if (!response.headersSent) {
-        throw new NotFoundException('El archivo no existe o no está disponible.');
-      }
+      this.logger.error(`Error al descargar ${key}: ${error instanceof Error ? error.message : String(error)}`);
+      if (!response.headersSent) throw new NotFoundException('El archivo no existe o no está disponible.');
     }
+  }
+
+  async downloadTemporary(token: string, response: Response): Promise<void> {
+    const file = this.temporaryFiles.get(token);
+
+    if (!file || file.expires < Date.now()) {
+      this.temporaryFiles.delete(token);
+      throw new NotFoundException('La descarga temporal ya no está disponible.');
+    }
+
+    response.setHeader(
+      'Content-Disposition',
+      `attachment; filename*=UTF-8''${encodeURIComponent(file.fileName)}`,
+    );
+    response.setHeader('Content-Type', file.contentType);
+    response.setHeader('Content-Length', file.buffer.length);
+    response.end(file.buffer);
+
+    this.temporaryFiles.delete(token);
   }
 
   async remove(id: string): Promise<void> {
     const key = this.storage.decodeId(id);
     const metadata = await this.storage.metadata(key);
+
     await Promise.all([
       this.storage.remove(key),
       ...(metadata.originalKey ? [this.storage.remove(metadata.originalKey)] : []),
     ]);
   }
 
-  private async store(
-    file: Express.Multer.File,
-    options: NormalisedUploadOptions,
-  ): Promise<StoredFile> {
+  private async store(file: Express.Multer.File, options: NormalisedUploadOptions): Promise<StoredFile> {
     const pdf = this.isPdf(file);
     const watermarked = pdf && options.pdfMode === 'watermarked';
 
-    // Hash estable del archivo que seleccionó el usuario.
-    // NO usamos como identificador principal el PDF generado por Stirling,
-    // porque ese PDF puede cambiar metadatos internos entre ejecuciones.
-    const sourceSha256 = createHash('sha256')
-      .update(file.buffer)
-      .digest('hex');
+    const sourceSha256 = createHash('sha256').update(file.buffer).digest('hex');
+    const fingerprint = createHash('sha256').update(sourceSha256).digest('hex');
 
-    const contents = watermarked
-      ? await this.addWatermark(file, options.watermarkText)
-      : file.buffer;
-
-    const contentType = pdf
-      ? 'application/pdf'
-      : file.mimetype || 'application/octet-stream';
-
-    // Una misma fuente puede tener dos versiones:
-    // 1) original
-    // 2) con marca de agua
-    //
-    // IMPORTANTE: el texto de la marca NO forma parte de la identidad.
-    // "POLICIA BOLIVIANA", "NO COPIAR", "CONFIDENCIAL", etc.
-    // pertenecen a la misma categoría: versión con marca de agua.
-    const fingerprint = createHash('sha256')
-      .update(
-        [
-          sourceSha256,
-          watermarked ? 'watermarked' : 'original',
-        ].join('|'),
-      )
-      .digest('hex');
-
-    // 1) Buscar por hash del archivo original + modo + marca.
-    // Esto detecta también versiones creadas con la implementación anterior
-    // que ya guardaban sha256 como hash del archivo fuente.
-    const bySourceHash = await this.storage.findBySourceSha256(
-      sourceSha256,
-      watermarked,
-    );
-
-    const existing = bySourceHash || await this.storage.findByFingerprint(fingerprint);
+    const existing =
+      await this.storage.findBySourceSha256(sourceSha256, false) ||
+      await this.storage.findBySourceSha256(sourceSha256, true) ||
+      await this.storage.findByFingerprint(fingerprint);
 
     if (existing) {
-      this.logger.log(
-        `Duplicado detectado por fingerprint: ${file.originalname} → ${existing.key}`,
-      );
+      this.logger.log(`Duplicado detectado: ${file.originalname}`);
 
-      const existingSize = Number(existing.metadata.originalSize);
+      /*
+       * El documento ya existe.
+       * NO se crea otra copia en MinIO.
+       *
+       * Si es PDF con marca, generamos una versión
+       * temporal con la marca que acaba de elegir
+       * el usuario.
+       */
+      if (pdf && watermarked) {
+        const contents = await this.addWatermark(file, options.watermarkText);
+        const token = this.createTemporaryFile(file.originalname, contents, 'application/pdf');
+
+        return this.toStoredFile(
+          existing.key,
+          file.originalname,
+          'application/pdf',
+          contents.length,
+          new Date().toISOString(),
+          true,
+          false,
+          'permanent',
+          undefined,
+          true,
+          `/api/files/duplicate/${token}`,
+        );
+      }
+
+      const size = Number(existing.metadata.originalSize);
 
       return this.toStoredFile(
         existing.key,
-        this.originalName(
-          existing.key,
-          existing.metadata.originalName,
-        ),
-        existing.metadata.contentType || contentType,
-        Number.isFinite(existingSize)
-          ? existingSize
-          : contents.length,
+        this.originalName(existing.key, existing.metadata.originalName),
+        existing.metadata.contentType || (pdf ? 'application/pdf' : file.mimetype || 'application/octet-stream'),
+        Number.isFinite(size) ? size : file.buffer.length,
         new Date().toISOString(),
         existing.metadata.watermarked === 'true',
         existing.metadata.compressed === 'true',
-        existing.metadata.retention === 'temporary'
-          ? 'temporary'
-          : 'permanent',
+        existing.metadata.retention === 'temporary' ? 'temporary' : 'permanent',
         existing.metadata.expiresAt || undefined,
         true,
       );
     }
 
-    // 2) Compatibilidad con archivos antiguos que no tienen fingerprint
-    // ni el hash del archivo fuente. Se compara nombre + tamaño + modo y,
-    // cuando existe, texto de marca.
-    const legacyVersion = await this.storage.findLegacyVersion(
-      file.originalname,
-      file.buffer.length,
-      watermarked,
-    );
+    const legacy = await this.storage.findLegacyVersion(file.originalname, file.buffer.length, watermarked);
 
-    if (legacyVersion) {
-      this.logger.log(
-        `Duplicado antiguo detectado: ${file.originalname} → ${legacyVersion.key}`,
-      );
-
-      const existingSize = Number(legacyVersion.metadata.originalSize);
+    if (legacy) {
+      const size = Number(legacy.metadata.originalSize);
 
       return this.toStoredFile(
-        legacyVersion.key,
-        this.originalName(
-          legacyVersion.key,
-          legacyVersion.metadata.originalName,
-        ),
-        legacyVersion.metadata.contentType || contentType,
-        Number.isFinite(existingSize)
-          ? existingSize
-          : file.buffer.length,
+        legacy.key,
+        this.originalName(legacy.key, legacy.metadata.originalName),
+        legacy.metadata.contentType || (pdf ? 'application/pdf' : file.mimetype || 'application/octet-stream'),
+        Number.isFinite(size) ? size : file.buffer.length,
         new Date().toISOString(),
-        legacyVersion.metadata.watermarked === 'true',
-        legacyVersion.metadata.compressed === 'true',
-        legacyVersion.metadata.retention === 'temporary'
-          ? 'temporary'
-          : 'permanent',
-        legacyVersion.metadata.expiresAt || undefined,
+        legacy.metadata.watermarked === 'true',
+        legacy.metadata.compressed === 'true',
+        legacy.metadata.retention === 'temporary' ? 'temporary' : 'permanent',
+        legacy.metadata.expiresAt || undefined,
         true,
       );
     }
 
-    // No existe la versión solicitada: guardar una sola copia.
+    const contents = watermarked
+      ? await this.addWatermark(file, options.watermarkText)
+      : file.buffer;
+
+    const contentType = pdf ? 'application/pdf' : file.mimetype || 'application/octet-stream';
     const key = this.storage.createKey(file.originalname);
     const compression = compressBuffer(contents);
 
@@ -303,20 +268,31 @@ export class FilesService {
       compression.compressed,
       options.retentionMode,
       options.expiresAt,
-      false,
     );
   }
 
-  private async addWatermark(
-    file: Express.Multer.File,
-    watermarkText: string,
-  ): Promise<Buffer> {
+  private createTemporaryFile(fileName: string, buffer: Buffer, contentType: string): string {
+    const token = randomUUID();
+
+    this.temporaryFiles.set(token, {
+      buffer,
+      fileName,
+      contentType,
+      expires: Date.now() + DUPLICATE_TTL,
+    });
+
+    setTimeout(() => {
+      const file = this.temporaryFiles.get(token);
+      if (file && file.expires <= Date.now()) this.temporaryFiles.delete(token);
+    }, DUPLICATE_TTL + 1000);
+
+    return token;
+  }
+
+  private async addWatermark(file: Express.Multer.File, watermarkText: string): Promise<Buffer> {
     const form = new FormData();
-    form.append(
-      'fileInput',
-      new Blob([file.buffer], { type: 'application/pdf' }),
-      file.originalname,
-    );
+
+    form.append('fileInput', new Blob([file.buffer], { type: 'application/pdf' }), file.originalname);
     form.append('customColor', '#4A5123');
     form.append('watermarkColor', '#4A5123');
     form.append('watermarkType', 'text');
@@ -329,82 +305,61 @@ export class FilesService {
     form.append('heightSpacer', '200');
 
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 120_000);
+    const timeout = setTimeout(() => controller.abort(), 120000);
+
     try {
       const apiKey = process.env.STIRLING_PDF_API_KEY;
-      const result = await fetch(
-        `${(process.env.STIRLING_PDF_URL || 'http://stirling-pdf:8080').replace(/\/$/, '')}/api/v1/security/add-watermark`,
-        {
-          method: 'POST',
-          body: form,
-          headers: apiKey ? { 'X-API-KEY': apiKey } : undefined,
-          signal: controller.signal,
-        },
-      );
+      const url = `${(process.env.STIRLING_PDF_URL || 'http://stirling-pdf:8080').replace(/\/$/, '')}/api/v1/security/add-watermark`;
+
+      const result = await fetch(url, {
+        method: 'POST',
+        body: form,
+        headers: apiKey ? { 'X-API-KEY': apiKey } : undefined,
+        signal: controller.signal,
+      });
 
       if (!result.ok) {
         const detail = (await result.text()).slice(0, 400);
-        this.logger.error(`Stirling PDF respondió ${result.status}: ${detail}`);
-        throw new BadGatewayException(
-          'No fue posible aplicar la marca de agua al PDF. No se guardó el archivo.',
-        );
+        this.logger.error(`Stirling PDF ${result.status}: ${detail}`);
+        throw new BadGatewayException('No fue posible aplicar la marca de agua al PDF. No se guardó el archivo.');
       }
 
       const processed = Buffer.from(await result.arrayBuffer());
-      if (!processed.length) {
-        throw new BadGatewayException(
-          'Stirling PDF devolvió un archivo vacío. No se guardó el archivo.',
-        );
-      }
+      if (!processed.length) throw new BadGatewayException('Stirling PDF devolvió un archivo vacío.');
+
       return processed;
     } catch (error) {
-      if (error instanceof BadGatewayException) {
-        throw error;
-      }
-      this.logger.error(
-        `No se pudo conectar con Stirling PDF: ${error instanceof Error ? error.message : String(error)}`,
-      );
-      throw new BadGatewayException(
-        'El servicio de protección de PDF no está disponible. No se guardó el archivo.',
-      );
+      if (error instanceof BadGatewayException) throw error;
+      this.logger.error(`Stirling PDF no disponible: ${error instanceof Error ? error.message : String(error)}`);
+      throw new BadGatewayException('El servicio de protección de PDF no está disponible. No se guardó el archivo.');
     } finally {
       clearTimeout(timeout);
     }
   }
 
-  private normaliseUploadOptions(
-    input: UploadOptions,
-  ): NormalisedUploadOptions {
+  private normaliseUploadOptions(input: UploadOptions): NormalisedUploadOptions {
     const pdfMode = input.pdfMode || 'watermarked';
-    if (pdfMode !== 'original' && pdfMode !== 'watermarked') {
+
+    if (pdfMode !== 'original' && pdfMode !== 'watermarked')
       throw new BadRequestException('El modo de almacenamiento para PDF no es válido.');
-    }
 
     const watermarkText = (input.watermarkText || WATERMARK_TEXT).trim();
-    if (pdfMode === 'watermarked' && !watermarkText) {
+
+    if (pdfMode === 'watermarked' && !watermarkText)
       throw new BadRequestException('La marca de agua para PDF no puede estar vacía.');
-    }
-    if (watermarkText.length > MAX_WATERMARK_TEXT_LENGTH) {
-      throw new BadRequestException(
-        `La marca de agua no puede superar ${MAX_WATERMARK_TEXT_LENGTH} caracteres.`,
-      );
-    }
 
-    const retentionMode: RetentionMode =
-      input.retentionMode === 'temporary' ? 'temporary' : 'permanent';
+    if (watermarkText.length > MAX_WATERMARK_TEXT_LENGTH)
+      throw new BadRequestException(`La marca de agua no puede superar ${MAX_WATERMARK_TEXT_LENGTH} caracteres.`);
 
+    const retentionMode: RetentionMode = input.retentionMode === 'temporary' ? 'temporary' : 'permanent';
     let expiresAt: string | undefined;
+
     if (retentionMode === 'temporary') {
       const days = Number(input.retentionDays);
-      if (
-        !Number.isFinite(days) ||
-        days < MIN_RETENTION_DAYS ||
-        days > MAX_RETENTION_DAYS
-      ) {
-        throw new BadRequestException(
-          `Indique un lapso de conservación válido, entre ${MIN_RETENTION_DAYS} y ${MAX_RETENTION_DAYS} días.`,
-        );
-      }
+
+      if (!Number.isFinite(days) || days < MIN_RETENTION_DAYS || days > MAX_RETENTION_DAYS)
+        throw new BadRequestException(`Indique un lapso válido entre ${MIN_RETENTION_DAYS} y ${MAX_RETENTION_DAYS} días.`);
+
       const expiry = new Date();
       expiry.setDate(expiry.getDate() + days);
       expiresAt = expiry.toISOString();
@@ -414,10 +369,7 @@ export class FilesService {
   }
 
   private isPdf(file: Express.Multer.File): boolean {
-    return (
-      file.mimetype === 'application/pdf' ||
-      extname(file.originalname).toLowerCase() === '.pdf'
-    );
+    return file.mimetype === 'application/pdf' || extname(file.originalname).toLowerCase() === '.pdf';
   }
 
   private toStoredFile(
@@ -431,9 +383,11 @@ export class FilesService {
     retention: RetentionMode,
     expiresAt?: string,
     duplicate = false,
+    customDownloadUrl?: string,
   ): StoredFile {
     const id = this.storage.encodeId(key);
-    const downloadUrl = `/api/files/${id}`;
+    const downloadUrl = customDownloadUrl || `/api/files/${id}`;
+
     return {
       id,
       fileName,
@@ -442,7 +396,7 @@ export class FilesService {
       uploadedAt,
       watermarked,
       downloadUrl,
-      viewUrl: `${downloadUrl}?disposition=inline`,
+      viewUrl: customDownloadUrl || `${downloadUrl}?disposition=inline`,
       compressed,
       retention,
       expiresAt,
@@ -452,11 +406,7 @@ export class FilesService {
 
   private originalName(key: string, encodedName?: string): string {
     if (encodedName) {
-      try {
-        return decodeURIComponent(encodedName);
-      } catch {
-        // Un valor de metadatos corrupto no debe impedir la descarga.
-      }
+      try { return decodeURIComponent(encodedName); } catch {}
     }
     return key.substring(key.lastIndexOf('-') + 1);
   }
