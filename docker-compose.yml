@@ -9,6 +9,7 @@ services:
     volumes:
       - minio_data:/data
     ports:
+      - "9000:9000"
       - "9001:9001"
     restart: unless-stopped
 
@@ -36,7 +37,7 @@ services:
       - minio
       - stirling-pdf
     ports:
-      - "5000:4000"
+      - "4000:4000"
     restart: unless-stopped
 
   frontend:
