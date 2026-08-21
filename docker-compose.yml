@@ -34,11 +34,18 @@ services:
       S3_ENDPOINT: http://minio:9000
       STIRLING_PDF_URL: http://stirling-pdf:8080
     depends_on:
-      - minio
-      - stirling-pdf
+      minio:
+        condition: service_started
+      stirling-pdf:
+        condition: service_started
     ports:
       - "4000:4000"
     restart: unless-stopped
+    healthcheck:
+      test: ['CMD', 'node', '-e', "fetch('http://localhost:4000/api/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
 
   frontend:
     build:

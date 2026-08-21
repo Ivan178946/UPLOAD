@@ -30,6 +30,19 @@ import { Response } from 'express';
 
 const MAX_FILES_PER_REQUEST = 10;
 const MAX_FILE_SIZE = 50 * 1024 * 1024;
+const BLOCKED_FILE_EXTENSIONS = new Set([
+  '.bat',
+  '.cmd',
+  '.com',
+  '.exe',
+  '.html',
+  '.htm',
+  '.js',
+  '.msi',
+  '.ps1',
+  '.sh',
+  '.svg',
+]);
 
 @ApiTags('Archivos')
 @Controller('files')
@@ -199,6 +212,17 @@ export class FilesController {
               new Error(
                 'El archivo debe tener un nombre.',
               ),
+              false,
+            );
+            return;
+          }
+
+          const extension = file.originalname
+            .slice(file.originalname.lastIndexOf('.'))
+            .toLowerCase();
+          if (BLOCKED_FILE_EXTENSIONS.has(extension)) {
+            callback(
+              new Error('El tipo de archivo no está permitido.'),
               false,
             );
             return;

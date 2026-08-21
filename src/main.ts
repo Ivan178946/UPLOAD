@@ -13,7 +13,28 @@ async function bootstrap() {
       instance: instance,
     }),
   });
-  app.setGlobalPrefix('/api');
+  app.setGlobalPrefix('api');
+  const configuredOrigins = (process.env.CORS_ORIGINS || '')
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+  const allowedOrigins = configuredOrigins.length
+    ? configuredOrigins
+    : process.env.NODE_ENV === 'production'
+      ? []
+      : ['http://localhost:3000', 'http://localhost:4200'];
+
+  app.enableCors({
+    origin: allowedOrigins,
+    methods: ['GET', 'HEAD', 'POST', 'DELETE'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+  });
+  app.use((_request, response, next) => {
+    response.setHeader('X-Content-Type-Options', 'nosniff');
+    response.setHeader('X-Frame-Options', 'DENY');
+    response.setHeader('Referrer-Policy', 'no-referrer');
+    next();
+  });
   if (process.env.NODE_ENV === 'development') {
     const config = new DocumentBuilder()
       .setTitle('Servicio de almacenamiento de Archivos V1')
@@ -29,7 +50,7 @@ async function bootstrap() {
     new ValidationPipe({
       transform: true,
       whitelist: true,
-      // forbidNonWhitelisted: true,
+      forbidNonWhitelisted: true,
     }),
   );
   app.use(compression());

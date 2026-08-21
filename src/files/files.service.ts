@@ -178,12 +178,16 @@ export class FilesService {
       metadata.compressed === 'true';
 
     try {
+      const canDisplayInline =
+        disposition === 'inline' &&
+        this.isSafeInlineContentType(
+          metadata.contentType || 'application/octet-stream',
+        );
+
       response.setHeader(
         'Content-Disposition',
         `${
-          disposition === 'inline'
-            ? 'inline'
-            : 'attachment'
+          canDisplayInline ? 'inline' : 'attachment'
         }; filename*=UTF-8''${encodeURIComponent(
           fileName,
         )}`,
@@ -665,6 +669,15 @@ export class FilesService {
       extname(
         file.originalname,
       ).toLowerCase() === '.pdf'
+    );
+  }
+
+  private isSafeInlineContentType(contentType: string): boolean {
+    return (
+      contentType === 'application/pdf' ||
+      contentType.startsWith('image/') ||
+      contentType.startsWith('audio/') ||
+      contentType.startsWith('video/')
     );
   }
 

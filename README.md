@@ -9,8 +9,8 @@ Servidor para almacenamiento de archivos como Imagenes y Documentos PDF
 ## Instrucciones de Uso
 
 1. Clonar el repositorio
-2. Instalar las dependencias del proyecto ```npm install```
-3. Clonar el archivo .env-example a .env y configurar las variables de entorno, en caso de necesitar almacenar los archivos en la plataforma cloudinary se debe crear una cuenta en la plataforma de cloudinary con el siguiente link [ir a cloudinary](https://cloudinary.com) y obtener las credenciales para la subida de archivos
+2. Instalar las dependencias del proyecto `npm ci`
+3. Crear el archivo `.env` y configurar las variables de entorno. No subas este archivo al repositorio.
 4. Para correr el proyecto debe ejecutar el siguiente comando ```npm run start:dev```
 
 ## Acceso a la documentacion del Proyecto
@@ -21,8 +21,14 @@ Para poder ver la documentación de las rutas del proyecto el entorno del proyec
 NODE_ENV=development
 
 # La url para el acceso es la siguiente
-http://localhost:puertoSeteado/api
+http://localhost:4000/api/docs
 ```
+
+## Configuración de seguridad
+
+- En producción define `CORS_ORIGINS` con los dominios autorizados, separados por comas. Por ejemplo: `https://archivos.ejemplo.bo`.
+- El endpoint de verificación para Docker es `GET /api/health`.
+- Las descargas se entregan como adjunto por defecto; solo PDF, imágenes, audio y video se pueden abrir en el navegador.
 ## Licencia
 
 Proyecto realizado por el departamento de desarrollo de Telematica de la Policia Bolivia Nacional

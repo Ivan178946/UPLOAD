@@ -7,6 +7,7 @@ import {
 import { ConfigModule } from '@nestjs/config';
 import { FilesModule } from './files/files.module';
 import { RequestLoggerMiddleware } from './utils/loggers/request-middleware';
+import { HealthController } from './health.controller';
 
 @Module({
   imports: [
@@ -15,7 +16,7 @@ import { RequestLoggerMiddleware } from './utils/loggers/request-middleware';
     }),
     FilesModule,
   ],
-  controllers: [],
+  controllers: [HealthController],
   providers: [Logger],
 })
 export class AppModule implements NestModule {

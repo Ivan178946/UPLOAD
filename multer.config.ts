@@ -1,4 +1,5 @@
 import { diskStorage } from 'multer';
+import { randomUUID } from 'crypto';
 import { extname } from 'path';
 
 export const multerOptions = {
@@ -7,10 +8,7 @@ export const multerOptions = {
     filename: (req, file, callback) => {
       const name = file.originalname.split('.')[0];
       const extension = extname(file.originalname);
-      const randomName = Array(32)
-        .fill(null)
-        .map(() => Math.round(Math.random() * 16).toString(16))
-        .join('');
+      const randomName = randomUUID();
       return callback(null, `${name}-${randomName}${extension}`);
     },
   }),

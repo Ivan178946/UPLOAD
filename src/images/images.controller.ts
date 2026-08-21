@@ -37,7 +37,9 @@ export class ImagesController {
   @ApiOperation({ summary: 'Subir archivo al servidor de Cloudinary' })
   @Post('cloud')
   @FilesFilter('imagenes', 20, ['jpg', 'jpeg', 'png'])
-  uploadToCloudinary(images: Array<Express.Multer.File>) {
+  uploadToCloudinary(
+    @UploadedFiles() images: Array<Express.Multer.File>,
+  ) {
     return this.imagesService.uploadImage(images, 'antecedentes');
   }
 
