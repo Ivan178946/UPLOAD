@@ -47,9 +47,7 @@ const BLOCKED_FILE_EXTENSIONS = new Set([
 @ApiTags('Archivos')
 @Controller('files')
 export class FilesController {
-  constructor(
-    private readonly filesService: FilesService,
-  ) {}
+  constructor(private readonly filesService: FilesService) {}
 
   @ApiOperation({
     summary: 'Sube hasta 10 archivos',
@@ -119,22 +117,18 @@ export class FilesController {
             type: 'string',
             example:
               'YXJjaGl2b3MvMjAyNi0wOC0yMC9mNGJkMzlmMC0yZGQ3LTQ1NTktOWFmYS1lMGRlNDZhZTVlMmUtSVZBTi5wZGY',
-            description:
-              'Identificador codificado del objeto almacenado.',
+            description: 'Identificador codificado del objeto almacenado.',
           },
 
           fileName: {
             type: 'string',
-            description:
-              'Nombre original del archivo.',
+            description: 'Nombre original del archivo.',
           },
 
           path: {
             type: 'string',
-            example:
-              'http://localhost:4000/api/files/YXJjaGl2b3Mv...',
-            description:
-              'Ruta pública del archivo almacenado para descarga.',
+            example: 'http://localhost:4000/api/files/YXJjaGl2b3Mv...',
+            description: 'Ruta pública del archivo almacenado para descarga.',
           },
 
           viewUrl: {
@@ -190,47 +184,31 @@ export class FilesController {
   })
   @Post()
   @UseInterceptors(
-    FilesInterceptor(
-      'files',
-      MAX_FILES_PER_REQUEST,
-      {
-        storage: memoryStorage(),
+    FilesInterceptor('files', MAX_FILES_PER_REQUEST, {
+      storage: memoryStorage(),
 
-        limits: {
-          fileSize: MAX_FILE_SIZE,
-          files: MAX_FILES_PER_REQUEST,
-        },
-
-        fileFilter: (
-          _request,
-          file,
-          callback,
-        ) => {
-          if (!file.originalname?.trim()) {
-            callback(
-              new Error(
-                'El archivo debe tener un nombre.',
-              ),
-              false,
-            );
-            return;
-          }
-
-          const extension = file.originalname
-            .slice(file.originalname.lastIndexOf('.'))
-            .toLowerCase();
-          if (BLOCKED_FILE_EXTENSIONS.has(extension)) {
-            callback(
-              new Error('El tipo de archivo no está permitido.'),
-              false,
-            );
-            return;
-          }
-
-          callback(null, true);
-        },
+      limits: {
+        fileSize: MAX_FILE_SIZE,
+        files: MAX_FILES_PER_REQUEST,
       },
-    ),
+
+      fileFilter: (_request, file, callback) => {
+        if (!file.originalname?.trim()) {
+          callback(new Error('El archivo debe tener un nombre.'), false);
+          return;
+        }
+
+        const extension = file.originalname
+          .slice(file.originalname.lastIndexOf('.'))
+          .toLowerCase();
+        if (BLOCKED_FILE_EXTENSIONS.has(extension)) {
+          callback(new Error('El tipo de archivo no está permitido.'), false);
+          return;
+        }
+
+        callback(null, true);
+      },
+    }),
   )
   upload(
     @UploadedFiles()
@@ -249,39 +227,29 @@ export class FilesController {
     retentionDays?: string,
   ) {
     if (!files?.length) {
-      throw new BadRequestException(
-        'Debe seleccionar al menos un archivo.',
-      );
+      throw new BadRequestException('Debe seleccionar al menos un archivo.');
     }
 
-    if (
-      files.length >
-      MAX_FILES_PER_REQUEST
-    ) {
+    if (files.length > MAX_FILES_PER_REQUEST) {
       throw new BadRequestException(
         `Solo se permiten hasta ${MAX_FILES_PER_REQUEST} archivos por operación.`,
       );
     }
 
-    return this.filesService.upload(
-      files,
-      {
-        pdfMode,
-        watermarkText,
-        retentionMode,
-        retentionDays,
-      },
-    );
+    return this.filesService.upload(files, {
+      pdfMode,
+      watermarkText,
+      retentionMode,
+      retentionDays,
+    });
   }
 
   @ApiOperation({
-    summary:
-      'Descarga un archivo duplicado con la marca personalizada.',
+    summary: 'Descarga un archivo duplicado con la marca personalizada.',
   })
   @ApiResponse({
     status: 200,
-    description:
-      'Archivo temporal generado correctamente.',
+    description: 'Archivo temporal generado correctamente.',
   })
   @Get('duplicate/:token')
   downloadDuplicate(
@@ -291,20 +259,15 @@ export class FilesController {
     @Res()
     response: Response,
   ) {
-    return this.filesService.downloadTemporary(
-      token,
-      response,
-    );
+    return this.filesService.downloadTemporary(token, response);
   }
 
   @ApiOperation({
-    summary:
-      'Lista los archivos almacenados.',
+    summary: 'Lista los archivos almacenados.',
   })
   @ApiResponse({
     status: 200,
-    description:
-      'Lista de archivos almacenados en MinIO.',
+    description: 'Lista de archivos almacenados en MinIO.',
   })
   @Get()
   list() {
@@ -312,18 +275,15 @@ export class FilesController {
   }
 
   @ApiOperation({
-    summary:
-      'Visualiza o descarga un archivo desde MinIO.',
+    summary: 'Visualiza o descarga un archivo desde MinIO.',
   })
   @ApiResponse({
     status: 200,
-    description:
-      'Archivo recuperado correctamente.',
+    description: 'Archivo recuperado correctamente.',
   })
   @ApiResponse({
     status: 404,
-    description:
-      'El archivo solicitado no existe.',
+    description: 'El archivo solicitado no existe.',
   })
   @Get(':id')
   download(
@@ -336,26 +296,19 @@ export class FilesController {
     @Res()
     response: Response,
   ) {
-    return this.filesService.download(
-      id,
-      response,
-      disposition,
-    );
+    return this.filesService.download(id, response, disposition);
   }
 
   @ApiOperation({
-    summary:
-      'Elimina un archivo de MinIO.',
+    summary: 'Elimina un archivo de MinIO.',
   })
   @ApiResponse({
     status: 204,
-    description:
-      'Archivo eliminado correctamente.',
+    description: 'Archivo eliminado correctamente.',
   })
   @ApiResponse({
     status: 404,
-    description:
-      'El archivo solicitado no existe.',
+    description: 'El archivo solicitado no existe.',
   })
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)

@@ -7,7 +7,8 @@ const rootFolder = 'uploads';
 
 export async function createFolder(options: FolderInt): Promise<string> {
   const logger = new Logger('createFolder');
-  const { folderName, nroDocumento, complemento, tipo, nombreSistema } = options;
+  const { folderName, nroDocumento, complemento, tipo, nombreSistema } =
+    options;
 
   const folderComponents = [
     rootFolder,

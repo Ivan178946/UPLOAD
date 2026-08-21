@@ -10,10 +10,6 @@ import { RetentionService } from './retention.service';
 @Module({
   imports: [StorageModule],
   controllers: [FilesController],
-  providers: [
-    FilesService,
-    RetentionService,
-    TransformationService,
-  ],
+  providers: [FilesService, RetentionService, TransformationService],
 })
 export class FilesModule {}

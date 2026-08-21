@@ -11,4 +11,4 @@ export interface FolderInt {
   tipo: TipoDocumento;
 }
 
-export type FolderBySystemInt = Omit<FolderInt, 'nroDocumento'| 'complemento'>
+export type FolderBySystemInt = Omit<FolderInt, 'nroDocumento' | 'complemento'>;

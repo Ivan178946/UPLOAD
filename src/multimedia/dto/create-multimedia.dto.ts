@@ -16,7 +16,9 @@ export class CreateMultimediaDto {
   complemento: string;
 
   @ApiProperty()
-  @IsNotEmpty({ message: 'El nombre de la carpeta contendedora es obligatorio' })
+  @IsNotEmpty({
+    message: 'El nombre de la carpeta contendedora es obligatorio',
+  })
   @IsString()
   nombreCarpeta: string;
 

@@ -39,8 +39,7 @@ export class TransformationService {
       const apiKey = process.env.STIRLING_PDF_API_KEY;
 
       const baseUrl = (
-        process.env.STIRLING_PDF_URL ||
-        'http://stirling-pdf:8080'
+        process.env.STIRLING_PDF_URL || 'http://stirling-pdf:8080'
       ).replace(/\/$/, '');
 
       const url = `${baseUrl}/api/v1/security/add-watermark`;
@@ -61,18 +60,14 @@ export class TransformationService {
       if (!result.ok) {
         const detail = (await result.text()).slice(0, 400);
 
-        this.logger.error(
-          `Stirling-PDF respondió ${result.status}: ${detail}`,
-        );
+        this.logger.error(`Stirling-PDF respondió ${result.status}: ${detail}`);
 
         throw new BadGatewayException(
           'No fue posible aplicar la marca de agua al PDF. No se guardó el archivo.',
         );
       }
 
-      const processed = Buffer.from(
-        await result.arrayBuffer(),
-      );
+      const processed = Buffer.from(await result.arrayBuffer());
 
       if (!processed.length) {
         throw new BadGatewayException(
@@ -92,9 +87,7 @@ export class TransformationService {
 
       this.logger.error(
         `Stirling-PDF no disponible: ${
-          error instanceof Error
-            ? error.message
-            : String(error)
+          error instanceof Error ? error.message : String(error)
         }`,
       );
 

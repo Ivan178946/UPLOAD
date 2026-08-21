@@ -47,7 +47,10 @@ describe('Files API (e2e)', () => {
   });
 
   it('GET /api/files devuelve una lista vacía inicialmente', () => {
-    return request(app.getHttpServer()).get('/api/files').expect(200).expect([]);
+    return request(app.getHttpServer())
+      .get('/api/files')
+      .expect(200)
+      .expect([]);
   });
 
   it('POST /api/files acepta un archivo que no es PDF y lo envía a MinIO', async () => {
@@ -92,7 +95,11 @@ describe('Files API (e2e)', () => {
     const response = await request(app.getHttpServer())
       .post('/api/files')
       .field('pdfMode', 'original')
-      .attach('files', Buffer.from('%PDF-1.4 contenido de prueba'), 'original.pdf')
+      .attach(
+        'files',
+        Buffer.from('%PDF-1.4 contenido de prueba'),
+        'original.pdf',
+      )
       .expect(201);
 
     expect(response.body).toEqual([
@@ -117,7 +124,8 @@ describe('Files API (e2e)', () => {
     );
     const fetchMock = jest.spyOn(global, 'fetch').mockResolvedValue({
       ok: true,
-      arrayBuffer: async () => new TextEncoder().encode('%PDF-1.4 protegido').buffer,
+      arrayBuffer: async () =>
+        new TextEncoder().encode('%PDF-1.4 protegido').buffer,
     } as Response);
 
     try {
@@ -125,7 +133,11 @@ describe('Files API (e2e)', () => {
         .post('/api/files')
         .field('pdfMode', 'watermarked')
         .field('watermarkText', 'USO INTERNO')
-        .attach('files', Buffer.from('%PDF-1.4 contenido de prueba'), 'protegido.pdf')
+        .attach(
+          'files',
+          Buffer.from('%PDF-1.4 contenido de prueba'),
+          'protegido.pdf',
+        )
         .expect(201);
 
       expect(response.body).toEqual([

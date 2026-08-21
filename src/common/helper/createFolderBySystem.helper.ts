@@ -5,16 +5,15 @@ import { Logger } from '@nestjs/common';
 
 const rootFolder = 'uploads';
 
-export async function createFolderBySystem(options: FolderBySystemInt): Promise<string> {
+export async function createFolderBySystem(
+  options: FolderBySystemInt,
+): Promise<string> {
   const logger = new Logger('createFolder');
   const { folderName, tipo, nombreSistema } = options;
 
-  const folderComponents = [
-    rootFolder,
-    nombreSistema,
-    tipo,
-    folderName,
-  ].filter(Boolean);
+  const folderComponents = [rootFolder, nombreSistema, tipo, folderName].filter(
+    Boolean,
+  );
 
   const folderPath = path.join(...folderComponents);
 

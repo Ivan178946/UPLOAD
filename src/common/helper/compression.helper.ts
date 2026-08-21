@@ -33,7 +33,12 @@ export function compressBuffer(input: Buffer): CompressionResult {
   const originalSize = input.length;
 
   if (originalSize < MIN_SIZE_TO_COMPRESS) {
-    return { buffer: input, compressed: false, originalSize, storedSize: originalSize };
+    return {
+      buffer: input,
+      compressed: false,
+      originalSize,
+      storedSize: originalSize,
+    };
   }
 
   const gzipped = gzipSync(input, { level: 9 });
@@ -47,5 +52,10 @@ export function compressBuffer(input: Buffer): CompressionResult {
     };
   }
 
-  return { buffer: input, compressed: false, originalSize, storedSize: originalSize };
+  return {
+    buffer: input,
+    compressed: false,
+    originalSize,
+    storedSize: originalSize,
+  };
 }

@@ -4,7 +4,11 @@ import { Request, Response, NextFunction } from 'express';
 @Injectable()
 export class RequestLoggerMiddleware implements NestMiddleware {
   private readonly logger = new Logger();
-  private statusCodesNotPermitted = [HttpStatus.UNAUTHORIZED, HttpStatus.NOT_FOUND, HttpStatus.METHOD_NOT_ALLOWED];
+  private statusCodesNotPermitted = [
+    HttpStatus.UNAUTHORIZED,
+    HttpStatus.NOT_FOUND,
+    HttpStatus.METHOD_NOT_ALLOWED,
+  ];
 
   use(req: Request, res: Response, next: NextFunction) {
     res.on('finish', () => {

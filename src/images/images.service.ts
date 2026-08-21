@@ -11,7 +11,7 @@ import { TipoDocumento } from 'src/common/interfaces/documentType.interface';
 import { DeleteFileDto } from './dto/deleteFile.dto';
 import { deleteFile } from 'src/common/helper/deleteFile.helper';
 import { createFolderBySystem } from 'src/common/helper/createFolderBySystem.helper';
-import { saveFile  } from 'src/common/helper/saveFile.helper';
+import { saveFile } from 'src/common/helper/saveFile.helper';
 
 @Injectable()
 export class ImagesService {

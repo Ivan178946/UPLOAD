@@ -19,12 +19,14 @@ export class CreateImageDto {
   complemento: string;
 
   @ApiProperty()
-  @IsNotEmpty({ message: 'El nombre de la carpeta contendedora es obligatorio'})
+  @IsNotEmpty({
+    message: 'El nombre de la carpeta contendedora es obligatorio',
+  })
   @IsString()
   nombreCarpeta: string;
 
   @ApiProperty()
-  @IsNotEmpty({ message: 'El nombre del sistema provieniente es obligatorio'})
+  @IsNotEmpty({ message: 'El nombre del sistema provieniente es obligatorio' })
   @IsString()
   nombreSistema: string;
 
@@ -36,4 +38,7 @@ export class CreateImageDto {
   images: any[];
 }
 
-export class CreateImageBySystem extends OmitType(CreateImageDto, ['nroDocumento', 'complemento']) {}
+export class CreateImageBySystem extends OmitType(CreateImageDto, [
+  'nroDocumento',
+  'complemento',
+]) {}

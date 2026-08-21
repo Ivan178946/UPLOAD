@@ -280,17 +280,13 @@ export class StorageService implements OnModuleInit {
           const stored = await this.get(object.key);
           if (!stored.Body) continue;
 
-          let buffer = Buffer.from(
-            await stored.Body.transformToByteArray(),
-          );
+          let buffer = Buffer.from(await stored.Body.transformToByteArray());
 
           if (metadata.compressed === 'true') {
             buffer = gunzipSync(buffer);
           }
 
-          const legacyHash = createHash('sha256')
-            .update(buffer)
-            .digest('hex');
+          const legacyHash = createHash('sha256').update(buffer).digest('hex');
 
           if (legacyHash === sha256) {
             return { key: object.key, metadata };
@@ -342,7 +338,9 @@ export class StorageService implements OnModuleInit {
       }
       return key;
     } catch {
-      throw new BadRequestException('El identificador del archivo no es válido.');
+      throw new BadRequestException(
+        'El identificador del archivo no es válido.',
+      );
     }
   }
 
@@ -352,7 +350,9 @@ export class StorageService implements OnModuleInit {
     } catch (error) {
       if (!this.isNotFound(error)) throw error;
       try {
-        await this.client.send(new CreateBucketCommand({ Bucket: this.bucket }));
+        await this.client.send(
+          new CreateBucketCommand({ Bucket: this.bucket }),
+        );
         this.logger.log(`Bucket «${this.bucket}» creado.`);
       } catch (createError) {
         if (!this.isAlreadyExists(createError)) throw createError;
@@ -364,13 +364,17 @@ export class StorageService implements OnModuleInit {
     const code =
       (error as { name?: string; Code?: string })?.name ||
       (error as { Code?: string })?.Code;
-    return ['NotFound', 'NoSuchBucket', 'NoSuchKey', '404'].includes(code || '');
+    return ['NotFound', 'NoSuchBucket', 'NoSuchKey', '404'].includes(
+      code || '',
+    );
   }
 
   private isAlreadyExists(error: unknown): boolean {
     const code =
       (error as { name?: string; Code?: string })?.name ||
       (error as { Code?: string })?.Code;
-    return ['BucketAlreadyOwnedByYou', 'BucketAlreadyExists'].includes(code || '');
+    return ['BucketAlreadyOwnedByYou', 'BucketAlreadyExists'].includes(
+      code || '',
+    );
   }
 }
