@@ -125,7 +125,6 @@ export class FilesController {
 
           fileName: {
             type: 'string',
-            example: 'IVAN.pdf',
             description:
               'Nombre original del archivo.',
           },
