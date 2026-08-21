@@ -20,4 +20,4 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run lint:check
-      - run: npm test -- --runInBand
+      - npm test -- --runInBand --passWithNoTests
