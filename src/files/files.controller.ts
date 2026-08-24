@@ -29,7 +29,7 @@ import { memoryStorage } from 'multer';
 import { Response } from 'express';
 
 const MAX_FILES_PER_REQUEST = 10;
-const MAX_FILE_SIZE = 50 * 1024 * 1024;
+const MAX_FILE_SIZE = 150 * 1024 * 1024;
 const BLOCKED_FILE_EXTENSIONS = new Set([
   '.bat',
   '.cmd',
